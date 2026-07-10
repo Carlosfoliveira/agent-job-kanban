@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { int, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export type ScoreBreakdown = Record<string, unknown>;
+
 export const jobs = sqliteTable("jobs", {
   id: int("id").primaryKey({ autoIncrement: true }),
   linkedinJobId: text("linkedin_job_id").notNull().unique(),
@@ -13,6 +15,9 @@ export const jobs = sqliteTable("jobs", {
   postedAt: text("posted_at"),
   status: text("status").notNull().default("inbox"),
   sortOrder: real("sort_order").notNull().default(0),
+  score: real("score"),
+  scoreBreakdown: text("score_breakdown", { mode: "json" }).$type<ScoreBreakdown>(),
+  techTags: text("tech_tags", { mode: "json" }).$type<string[]>(),
   createdAt: text("created_at").default(sql`(current_timestamp)`),
   updatedAt: text("updated_at").default(sql`(current_timestamp)`),
 });
@@ -28,4 +33,10 @@ export const emails = sqliteTable("emails", {
   receivedAt: text("received_at"),
   seen: int("seen").notNull().default(0),
   classification: text("classification"),
+  dismissed: int("dismissed").notNull().default(0),
+});
+
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value"),
 });

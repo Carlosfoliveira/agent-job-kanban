@@ -4,11 +4,12 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { api, type JobsResponse } from "./api";
+import { api, type EmailsResponse, type JobsResponse } from "./api";
 import type { Job, NewEmailInput, UpdateEmailInput, UpdateJobInput } from "./types";
 
 export const jobsQueryKey = ["jobs"] as const;
 export const unmatchedEmailsQueryKey = ["emails", "unmatched"] as const;
+export const settingsQueryKey = ["settings"] as const;
 
 export function useJobs() {
   return useQuery({
@@ -69,10 +70,101 @@ export function useUpdateJob() {
   });
 }
 
+export function useDeleteJob() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: number) => api.deleteJob(id),
+    onMutate: async (id: number) => {
+      await queryClient.cancelQueries({ queryKey: jobsQueryKey });
+
+      const previousJobs = queryClient.getQueryData<JobsResponse>(
+        jobsQueryKey,
+      );
+
+      queryClient.setQueryData<JobsResponse>(jobsQueryKey, (old) => {
+        if (!old) return old;
+        return { jobs: old.jobs.filter((job) => job.id !== id) };
+      });
+
+      return { previousJobs };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previousJobs) {
+        queryClient.setQueryData<JobsResponse>(
+          jobsQueryKey,
+          context.previousJobs,
+        );
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: jobsQueryKey });
+    },
+  });
+}
+
+export function useSettings() {
+  return useQuery({
+    queryKey: settingsQueryKey,
+    queryFn: api.getSettings,
+  });
+}
+
+export function useUpdateSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (screenOutThreshold: number) =>
+      api.updateSettings({ screenOutThreshold }),
+    // The server reconciles inbox <-> screened_out in the same request, so
+    // both caches are stale the moment it responds.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: settingsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: jobsQueryKey });
+    },
+  });
+}
+
 export function useUnmatchedEmails() {
   return useQuery({
     queryKey: unmatchedEmailsQueryKey,
     queryFn: api.getUnmatchedEmails,
+  });
+}
+
+export function useDismissEmail() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: number) => api.dismissEmail(id),
+    onMutate: async (id: number) => {
+      await queryClient.cancelQueries({ queryKey: unmatchedEmailsQueryKey });
+
+      const previousEmails = queryClient.getQueryData<EmailsResponse>(
+        unmatchedEmailsQueryKey,
+      );
+
+      queryClient.setQueryData<EmailsResponse>(
+        unmatchedEmailsQueryKey,
+        (old) => {
+          if (!old) return old;
+          return { emails: old.emails.filter((email) => email.id !== id) };
+        },
+      );
+
+      return { previousEmails };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previousEmails) {
+        queryClient.setQueryData<EmailsResponse>(
+          unmatchedEmailsQueryKey,
+          context.previousEmails,
+        );
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: unmatchedEmailsQueryKey });
+    },
   });
 }
 

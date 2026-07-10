@@ -1,13 +1,14 @@
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { Building2, ExternalLink, MapPin, X } from "lucide-react";
-import { useEffect } from "react";
-import { useJobs, useMarkJobEmailsSeen } from "@/lib/queries";
+import { Building2, ExternalLink, MapPin, Trash2, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useDeleteJob, useJobs, useMarkJobEmailsSeen } from "@/lib/queries";
 import { STAGE_STYLES, STATUS_LABELS } from "@/lib/stage";
 import { formatRelative } from "@/lib/time";
-import type { Job } from "@/lib/types";
+import type { Job, ScoreBreakdown } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
 import { EmailList } from "./email-list";
+import { scoreBandChip } from "./job-card";
 
 const route = getRouteApi("/jobs/$jobId");
 
@@ -65,6 +66,138 @@ function SheetHeader({ job, onClose }: { job: Job; onClose: () => void }) {
         </a>
       )}
     </header>
+  );
+}
+
+const BREAKDOWN_FIELDS = [
+  ["cv", "CV"],
+  ["northStar", "North star"],
+  ["comp", "Comp"],
+  ["cultural", "Culture"],
+  ["redFlags", "Red flags"],
+] as const satisfies readonly (readonly [keyof ScoreBreakdown, string])[];
+
+function ScoreSection({ job }: { job: Job }) {
+  const breakdown = job.scoreBreakdown;
+
+  return (
+    <section className="border-b border-line px-5 py-4">
+      <h3 className="font-mono text-[10px] font-medium tracking-[0.18em] text-faint uppercase">
+        Screening
+      </h3>
+      {job.score === null ? (
+        <p className="mt-2 text-xs text-faint">
+          Not scored yet — the scorer will pick this up.
+        </p>
+      ) : (
+        <>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span
+              className={cn(
+                "rounded px-2 py-1 font-mono text-xl leading-none font-semibold",
+                scoreBandChip(job.score),
+              )}
+            >
+              {job.score.toFixed(1)}
+            </span>
+            <span className="font-mono text-[11px] text-faint">/ 5</span>
+            {breakdown?.lowConfidence && (
+              <span
+                title="The scorer had limited information for this job"
+                className="rounded bg-signal/10 px-1.5 py-0.5 font-mono text-[10px] leading-none font-medium text-signal"
+              >
+                low confidence
+              </span>
+            )}
+          </div>
+          {breakdown && (
+            <>
+              <dl className="mt-3 grid grid-cols-5 gap-2">
+                {BREAKDOWN_FIELDS.map(([key, label]) => {
+                  const value = breakdown[key];
+                  return (
+                    <div key={key} className="min-w-0">
+                      <dt className="truncate font-mono text-[9px] tracking-wider text-faint uppercase">
+                        {label}
+                      </dt>
+                      <dd className="mt-0.5 font-mono text-sm text-bone">
+                        {typeof value === "number" ? value.toFixed(1) : "—"}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+              {breakdown.rationale && (
+                <p className="mt-3 text-[13px] leading-relaxed text-mist">
+                  {breakdown.rationale}
+                </p>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function StackSection({ tags }: { tags: string[] }) {
+  return (
+    <section className="border-b border-line px-5 py-4">
+      <h3 className="font-mono text-[10px] font-medium tracking-[0.18em] text-faint uppercase">
+        Stack · {tags.length}
+      </h3>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            className="rounded border border-line bg-ink/40 px-2 py-1 font-mono text-[11px] leading-none text-mist"
+          >
+            {tag}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Two-step inline confirm: first click arms it ("Confirm delete?"),
+ * a second click within 3s deletes; otherwise it quietly disarms.
+ */
+function DeleteJobButton({ jobId }: { jobId: number }) {
+  const navigate = useNavigate();
+  const deleteJob = useDeleteJob();
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(false), 3000);
+    return () => clearTimeout(timer);
+  }, [confirming]);
+
+  const handleClick = () => {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    deleteJob.mutate(jobId);
+    void navigate({ to: "/" });
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={deleteJob.isPending}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50",
+        confirming
+          ? "border-stage-rejected/50 bg-stage-rejected/10 font-medium text-stage-rejected hover:bg-stage-rejected/20"
+          : "border-line text-faint hover:border-stage-rejected/40 hover:text-stage-rejected",
+      )}
+    >
+      <Trash2 size={12} />
+      {confirming ? "Confirm delete?" : "Delete card"}
+    </button>
   );
 }
 
@@ -127,6 +260,10 @@ export function JobDetailSheet() {
           <>
             <SheetHeader job={job} onClose={close} />
             <div className="flex-1 overflow-y-auto">
+              <ScoreSection job={job} />
+              {job.techTags && job.techTags.length > 0 && (
+                <StackSection tags={job.techTags} />
+              )}
               <section className="border-b border-line px-5 py-4">
                 <h3 className="font-mono text-[10px] font-medium tracking-[0.18em] text-faint uppercase">
                   Mail{emails.length > 0 ? ` · ${emails.length}` : ""}
@@ -148,6 +285,9 @@ export function JobDetailSheet() {
                 )}
               </section>
             </div>
+            <footer className="flex shrink-0 justify-end border-t border-line px-5 py-3">
+              <DeleteJobButton jobId={job.id} />
+            </footer>
           </>
         )}
       </aside>

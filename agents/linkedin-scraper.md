@@ -101,7 +101,7 @@ End every run — success, early stop, or error — by printing one paragraph co
 - `GET /api/jobs/exists?linkedinJobId=<id>` → `{ exists }`
 - `POST /api/jobs` `{ linkedinJobId, title, company, location, workplaceType, description, url, postedAt, status? }` → `201 { duplicate: false }` (inserted) or `200 { duplicate: true }` (already existed)
 - `GET /api/jobs/search?company=<q>&title=<q>` → `{ jobs }` (case-insensitive partial match; use short distinctive fragments) — available if you need to cross-check a job, not required for the core flow.
-- `PATCH /api/jobs/:id` `{ status }` — status one of `inbox|applied|action_needed|waiting|interview|offer|rejected` — not used in this playbook, listed for reference.
+- `PATCH /api/jobs/:id` `{ status }` — status one of `screened_out|inbox|applied|action_needed|waiting|interview|offer|rejected` — not used in this playbook, listed for reference.
 - `POST /api/jobs/:id/emails` `{ gmailMessageId, gmailThreadId, subject, sender, snippet, receivedAt, classification }` — idempotent on `gmailMessageId` — not used in this playbook.
 - `POST /api/emails` — same shape, no job — idempotent — not used in this playbook.
 - `GET /api/jobs` → `{ jobs }` full list — available for debugging, not required for the core flow.

@@ -1,4 +1,5 @@
 export const JOB_STATUSES = [
+  "screened_out",
   "inbox",
   "applied",
   "action_needed",
@@ -21,6 +22,17 @@ export const EMAIL_CLASSIFICATIONS = [
 
 export type EmailClassification = (typeof EMAIL_CLASSIFICATIONS)[number];
 
+/** Per-dimension screening scores (1–5) plus the scorer's rationale. */
+export interface ScoreBreakdown {
+  cv: number;
+  northStar: number;
+  comp: number;
+  cultural: number;
+  redFlags: number;
+  rationale: string;
+  lowConfidence?: boolean;
+}
+
 export interface Job {
   id: number;
   linkedinJobId: string;
@@ -33,6 +45,10 @@ export interface Job {
   postedAt: string | null;
   status: JobStatus;
   sortOrder: number;
+  /** 1–5 overall fit; null while the scorer hasn't run yet. */
+  score: number | null;
+  scoreBreakdown: ScoreBreakdown | null;
+  techTags: string[] | null;
   createdAt: string | null;
   updatedAt: string | null;
   emailCount: number;
@@ -49,6 +65,7 @@ export interface Email {
   snippet: string | null;
   receivedAt: string | null;
   seen: number;
+  dismissed: number;
   classification: EmailClassification | null;
 }
 
@@ -83,5 +100,6 @@ export interface NewEmailInput {
 
 export interface UpdateEmailInput {
   jobId?: number | null;
-  seen?: number;
+  seen?: boolean;
+  dismissed?: boolean;
 }

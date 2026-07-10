@@ -3,7 +3,7 @@
 
 /*
  * Cockpit palette: deep blue-slate ink, one warm amber signal reserved for
- * unseen mail, and seven muted stage hues that carry pipeline information.
+ * unseen mail, and eight muted stage hues that carry pipeline information.
  */
 @theme {
   --font-sans:
@@ -23,6 +23,7 @@
 
   --color-signal: #f0b54a;
 
+  --color-stage-screened: #66727e;
   --color-stage-inbox: #94a3b3;
   --color-stage-applied: #6ca5e0;
   --color-stage-action: #e88352;

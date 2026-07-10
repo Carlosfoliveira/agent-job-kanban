@@ -17,6 +17,12 @@ export interface StageStyle {
 }
 
 export const STAGE_STYLES: Record<JobStatus, StageStyle> = {
+  screened_out: {
+    rail: "bg-stage-screened/40",
+    chip: "bg-stage-screened/10 text-stage-screened",
+    ring: "ring-stage-screened/50",
+    dot: "bg-stage-screened",
+  },
   inbox: {
     rail: "bg-stage-inbox/50",
     chip: "bg-stage-inbox/10 text-stage-inbox",

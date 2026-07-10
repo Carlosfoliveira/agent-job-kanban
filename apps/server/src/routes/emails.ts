@@ -1,4 +1,4 @@
-import { eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { DbClient } from "../db/client";
@@ -35,10 +35,15 @@ const patchEmailSchema = z
   .object({
     jobId: z.number().int().nullable().optional(),
     seen: z.boolean().optional(),
+    dismissed: z.boolean().optional(),
   })
-  .refine((data) => data.jobId !== undefined || data.seen !== undefined, {
-    message: "At least one of jobId or seen must be provided",
-  });
+  .refine(
+    (data) =>
+      data.jobId !== undefined || data.seen !== undefined || data.dismissed !== undefined,
+    {
+      message: "At least one of jobId, seen, or dismissed must be provided",
+    },
+  );
 
 async function findEmailByGmailMessageId(db: DbClient, gmailMessageId: string) {
   return db
@@ -51,9 +56,12 @@ async function findEmailByGmailMessageId(db: DbClient, gmailMessageId: string) {
 export function createEmailsRouter(db: DbClient) {
   const router = new Hono();
 
-  // GET /api/emails/unmatched — emails with no job_id.
+  // GET /api/emails/unmatched — emails with no job_id, excluding dismissed.
   router.get("/unmatched", async (c) => {
-    const rows = await db.select().from(emails).where(isNull(emails.jobId));
+    const rows = await db
+      .select()
+      .from(emails)
+      .where(and(isNull(emails.jobId), eq(emails.dismissed, 0)));
     return c.json({ emails: rows });
   });
 
@@ -114,10 +122,11 @@ export function createEmailsRouter(db: DbClient) {
       return c.json({ error: parsed.error.flatten() }, 400);
     }
 
-    const { jobId, seen } = parsed.data;
+    const { jobId, seen, dismissed } = parsed.data;
     const updates: Partial<typeof emails.$inferInsert> = {};
     if (jobId !== undefined) updates.jobId = jobId;
     if (seen !== undefined) updates.seen = seen ? 1 : 0;
+    if (dismissed !== undefined) updates.dismissed = dismissed ? 1 : 0;
 
     const [email] = await db
       .update(emails)

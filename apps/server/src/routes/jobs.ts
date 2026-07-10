@@ -2,9 +2,10 @@ import { and, eq, like, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { DbClient } from "../db/client";
-import { emails, jobs } from "../db/schema";
+import { emails, jobs, settings } from "../db/schema";
 
 export const JOB_STATUSES = [
+  "screened_out",
   "inbox",
   "applied",
   "action_needed",
@@ -29,14 +30,34 @@ const createJobSchema = z.object({
   sortOrder: z.number().optional(),
 });
 
+const scoreBreakdownSchema = z.record(z.string(), z.unknown());
+
 const patchJobSchema = z
   .object({
     status: jobStatusSchema.optional(),
     sortOrder: z.number().optional(),
+    score: z.number().min(1).max(5).nullable().optional(),
+    scoreBreakdown: scoreBreakdownSchema.nullable().optional(),
+    techTags: z.array(z.string()).max(20).nullable().optional(),
   })
-  .refine((data) => data.status !== undefined || data.sortOrder !== undefined, {
-    message: "At least one of status or sortOrder must be provided",
-  });
+  .refine(
+    (data) =>
+      data.status !== undefined ||
+      data.sortOrder !== undefined ||
+      data.score !== undefined ||
+      data.scoreBreakdown !== undefined ||
+      data.techTags !== undefined,
+    {
+      message:
+        "At least one of status, sortOrder, score, scoreBreakdown, or techTags must be provided",
+    },
+  );
+
+const scoreJobSchema = z.object({
+  score: z.number().min(1).max(5),
+  scoreBreakdown: scoreBreakdownSchema.optional(),
+  techTags: z.array(z.string()).max(20).optional(),
+});
 
 const existsQuerySchema = z.object({
   linkedinJobId: z.string().min(1),
@@ -97,6 +118,9 @@ export function createJobsRouter(db: DbClient) {
         postedAt: jobs.postedAt,
         status: jobs.status,
         sortOrder: jobs.sortOrder,
+        score: jobs.score,
+        scoreBreakdown: jobs.scoreBreakdown,
+        techTags: jobs.techTags,
         createdAt: jobs.createdAt,
         updatedAt: jobs.updatedAt,
         emailCount: sql<number>`count(${emails.id})`.mapWith(Number),
@@ -206,12 +230,15 @@ export function createJobsRouter(db: DbClient) {
       return c.json({ error: parsed.error.flatten() }, 400);
     }
 
-    const { status, sortOrder } = parsed.data;
+    const { status, sortOrder, score, scoreBreakdown, techTags } = parsed.data;
     const updates: Partial<typeof jobs.$inferInsert> = {
       updatedAt: new Date().toISOString(),
     };
     if (status !== undefined) updates.status = status;
     if (sortOrder !== undefined) updates.sortOrder = sortOrder;
+    if (score !== undefined) updates.score = score;
+    if (scoreBreakdown !== undefined) updates.scoreBreakdown = scoreBreakdown;
+    if (techTags !== undefined) updates.techTags = techTags;
 
     const [job] = await db
       .update(jobs)
@@ -224,6 +251,77 @@ export function createJobsRouter(db: DbClient) {
     }
 
     return c.json({ job });
+  });
+
+  // POST /api/jobs/:id/score — set a job's score (and optional breakdown /
+  // tech tags) in one atomic update. If the job is in "inbox" and the new
+  // score is below the configured screen_out_threshold, it's moved to
+  // "screened_out"; otherwise its status is left untouched.
+  router.post("/:id/score", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) {
+      return c.json({ error: "Invalid job id" }, 400);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = scoreJobSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.flatten() }, 400);
+    }
+
+    const { score, scoreBreakdown, techTags } = parsed.data;
+
+    const thresholdSetting = await db
+      .select()
+      .from(settings)
+      .where(eq(settings.key, "screen_out_threshold"))
+      .get();
+    const threshold = Number(thresholdSetting?.value ?? "3.0");
+
+    const now = new Date().toISOString();
+
+    const [job] = await db
+      .update(jobs)
+      .set({
+        score,
+        scoreBreakdown: scoreBreakdown ?? null,
+        techTags: techTags ?? null,
+        updatedAt: now,
+        status: sql`CASE WHEN ${jobs.status} = 'inbox' AND ${score} < ${threshold} THEN 'screened_out' ELSE ${jobs.status} END`,
+      })
+      .where(eq(jobs.id, id))
+      .returning();
+
+    if (!job) {
+      return c.json({ error: "Job not found" }, 404);
+    }
+
+    return c.json({ job });
+  });
+
+  // DELETE /api/jobs/:id — remove a job. Attached emails are tombstoned
+  // (job_id cleared, dismissed set) rather than deleted, so the gmail
+  // agent's idempotency (keyed on gmail_message_id) keeps working.
+  router.delete("/:id", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) {
+      return c.json({ error: "Invalid job id" }, 400);
+    }
+
+    const job = await db.select().from(jobs).where(eq(jobs.id, id)).get();
+    if (!job) {
+      return c.json({ error: "Job not found" }, 404);
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(emails)
+        .set({ jobId: null, dismissed: 1 })
+        .where(eq(emails.jobId, id));
+      await tx.delete(jobs).where(eq(jobs.id, id));
+    });
+
+    return c.json({ deleted: true });
   });
 
   // POST /api/jobs/:id/emails — attach an email to a job, idempotent on

@@ -7,7 +7,12 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { gmailMessageUrl } from "@/lib/columns";
-import { useJobs, usePatchEmail, useUnmatchedEmails } from "@/lib/queries";
+import {
+  useDismissEmail,
+  useJobs,
+  usePatchEmail,
+  useUnmatchedEmails,
+} from "@/lib/queries";
 import { STAGE_STYLES, STATUS_LABELS } from "@/lib/stage";
 import { formatDateTime } from "@/lib/time";
 import type { Email } from "@/lib/types";
@@ -100,6 +105,7 @@ function JobPicker({
 
 function UnmatchedRow({ email }: { email: Email }) {
   const [picking, setPicking] = useState(false);
+  const dismissEmail = useDismissEmail();
 
   return (
     <li className="border-b border-line/60 px-3 py-2.5 last:border-b-0">
@@ -140,6 +146,16 @@ function UnmatchedRow({ email }: { email: Email }) {
         >
           {picking ? <X size={13} /> : <Paperclip size={13} />}
         </button>
+        {!picking && (
+          <button
+            onClick={() => dismissEmail.mutate(email.id)}
+            disabled={dismissEmail.isPending}
+            title="Dismiss — hide this email for good"
+            className="shrink-0 rounded border border-line p-1.5 text-faint transition-colors hover:border-stage-rejected/40 hover:text-stage-rejected disabled:opacity-50"
+          >
+            <X size={13} />
+          </button>
+        )}
       </div>
       {picking && (
         <JobPicker emailId={email.id} onDone={() => setPicking(false)} />

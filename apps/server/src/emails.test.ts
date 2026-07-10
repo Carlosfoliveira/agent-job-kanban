@@ -150,6 +150,26 @@ describe("PATCH /api/emails/:id", () => {
     const body = await readJson<{ email: EmailRow }>(res);
     expect(body.email.jobId).toBe(job.id);
   });
+
+  it("dismissing an email excludes it from /unmatched", async () => {
+    const { app } = createTestApp();
+    const created = await readJson<EmailResponse>(
+      await postJson(app, "/api/emails", { gmailMessageId: "gm-dismiss" }),
+    );
+
+    const res = await app.request(`/api/emails/${created.email.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dismissed: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = await readJson<{ email: EmailRow }>(res);
+    expect(body.email.dismissed).toBe(1);
+
+    const unmatchedRes = await app.request("/api/emails/unmatched");
+    const unmatchedBody = await readJson<EmailsListResponse>(unmatchedRes);
+    expect(unmatchedBody.emails.find((e) => e.id === created.email.id)).toBeUndefined();
+  });
 });
 
 describe("POST /api/jobs/:id/emails/seen", () => {

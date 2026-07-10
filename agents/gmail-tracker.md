@@ -66,10 +66,10 @@ The insert endpoints are idempotent on `gmailMessageId` (a `duplicate:true` / 20
 Only for messages that got a **new** (non-duplicate) match in step 6, and only via `PATCH /api/jobs/:id {status}`.
 
 Pipeline order (never move a card backwards):
-`inbox < applied < action_needed < waiting < interview < offer|rejected`
+`screened_out < inbox < applied < action_needed < waiting < interview < offer|rejected`
 
 Rules:
-- `confirmation` -> `applied`, but only if the card is currently `inbox`.
+- `confirmation` -> `applied`, but only if the card is currently `inbox` or `screened_out`.
 - Plain acknowledgement / "still reviewing" (treat as `confirmation` with no forward content, i.e. classification is `confirmation` but nothing new happened) -> `waiting`, but only if the card is currently `applied`.
 - `action_request` -> `action_needed`.
 - `interview` -> `interview`.

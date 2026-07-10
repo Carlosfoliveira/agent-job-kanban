@@ -32,6 +32,14 @@ export interface JobsResponse {
   jobs: Job[];
 }
 
+export interface JobResponse {
+  job: Job;
+}
+
+export interface DeleteJobResponse {
+  deleted: boolean;
+}
+
 export interface CreateJobResponse {
   duplicate: boolean;
   job: Job;
@@ -55,6 +63,23 @@ export interface AttachEmailResponse {
   email: Email;
 }
 
+export interface EmailResponse {
+  email: Email;
+}
+
+export interface SettingsResponse {
+  screenOutThreshold: number;
+}
+
+export interface UpdateSettingsResponse {
+  screenOutThreshold: number;
+  /** Jobs the server re-filed while reconciling against the new threshold. */
+  moved: {
+    toScreenedOut: number;
+    toInbox: number;
+  };
+}
+
 export const api = {
   // Jobs
   getJobs(): Promise<JobsResponse> {
@@ -73,10 +98,16 @@ export const api = {
     return request<ExistsResponse>(`/api/jobs/exists?${params.toString()}`);
   },
 
-  updateJob(id: number, input: UpdateJobInput): Promise<Job> {
-    return request<Job>(`/api/jobs/${id}`, {
+  updateJob(id: number, input: UpdateJobInput): Promise<JobResponse> {
+    return request<JobResponse>(`/api/jobs/${id}`, {
       method: "PATCH",
       body: JSON.stringify(input),
+    });
+  },
+
+  deleteJob(id: number): Promise<DeleteJobResponse> {
+    return request<DeleteJobResponse>(`/api/jobs/${id}`, {
+      method: "DELETE",
     });
   },
 
@@ -109,8 +140,29 @@ export const api = {
     return request<EmailsResponse>("/api/emails/unmatched");
   },
 
-  updateEmail(id: number, input: UpdateEmailInput): Promise<Email> {
-    return request<Email>(`/api/emails/${id}`, {
+  updateEmail(id: number, input: UpdateEmailInput): Promise<EmailResponse> {
+    return request<EmailResponse>(`/api/emails/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+
+  dismissEmail(id: number): Promise<EmailResponse> {
+    return request<EmailResponse>(`/api/emails/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ dismissed: true }),
+    });
+  },
+
+  // Settings
+  getSettings(): Promise<SettingsResponse> {
+    return request<SettingsResponse>("/api/settings");
+  },
+
+  updateSettings(input: {
+    screenOutThreshold: number;
+  }): Promise<UpdateSettingsResponse> {
+    return request<UpdateSettingsResponse>("/api/settings", {
       method: "PATCH",
       body: JSON.stringify(input),
     });

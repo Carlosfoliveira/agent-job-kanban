@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import type { DbClient } from "./db/client";
 import { createEmailsRouter } from "./routes/emails";
 import { createJobsRouter } from "./routes/jobs";
+import { createSettingsRouter } from "./routes/settings";
 
 // Factory so tests can inject an in-memory db instead of the real one.
 export function createApp(db: DbClient) {
@@ -19,6 +20,7 @@ export function createApp(db: DbClient) {
 
   app.route("/api/jobs", createJobsRouter(db));
   app.route("/api/emails", createEmailsRouter(db));
+  app.route("/api/settings", createSettingsRouter(db));
 
   return app;
 }

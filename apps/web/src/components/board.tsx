@@ -13,13 +13,14 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useState } from "react";
-import { COLUMNS } from "@/lib/columns";
+import { COLUMNS, SCORE_SORTED_STATUSES } from "@/lib/columns";
 import { useJobs, useUpdateJob } from "@/lib/queries";
 import { STAGE_STYLES } from "@/lib/stage";
 import { JOB_STATUSES, type Job, type JobStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Column } from "./column";
 import { JobCardGhost } from "./job-card";
+import { ThresholdControl } from "./threshold-control";
 import { UnmatchedTray } from "./unmatched-tray";
 
 /** Prefer whatever is directly under the pointer; fall back for edges. */
@@ -28,11 +29,32 @@ const collisionDetection: CollisionDetection = (args) => {
   return within.length > 0 ? within : closestCorners(args);
 };
 
-/** While a card is dragged across columns, it previews at this position. */
+/**
+ * While a card is dragged across columns, it previews at this position.
+ * In score-sorted columns the index is ignored (SCORE_INDEX sentinel) —
+ * the comparator decides where the card lands.
+ */
 interface DragPreview {
   jobId: number;
   status: JobStatus;
   index: number;
+}
+
+/** Sentinel index for previews into score-sorted columns. */
+const SCORE_INDEX = -1;
+
+/**
+ * Order for score-sorted columns: unscored first (newest arrival on top,
+ * waiting for the scorer), then best score down.
+ */
+function compareByScore(a: Job, b: Job): number {
+  if (a.score === null || b.score === null) {
+    if (a.score !== null) return 1;
+    if (b.score !== null) return -1;
+    const byCreated = (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+    return byCreated !== 0 ? byCreated : a.id - b.id;
+  }
+  return b.score - a.score || a.id - b.id;
 }
 
 function buildColumns(
@@ -54,9 +76,18 @@ function buildColumns(
     }
     groups[job.status].push(job);
   }
+  for (const status of SCORE_SORTED_STATUSES) {
+    groups[status].sort(compareByScore);
+  }
   if (preview && dragged) {
     const list = groups[preview.status];
-    list.splice(Math.min(preview.index, list.length), 0, dragged);
+    if (SCORE_SORTED_STATUSES.has(preview.status)) {
+      // Preview exactly where the comparator will put it after the drop.
+      const slot = list.findIndex((job) => compareByScore(dragged, job) < 0);
+      list.splice(slot === -1 ? list.length : slot, 0, dragged);
+    } else {
+      list.splice(Math.min(preview.index, list.length), 0, dragged);
+    }
   }
   return groups;
 }
@@ -89,6 +120,8 @@ export function Board() {
 
   const jobs = data?.jobs ?? [];
   const columns = buildColumns(jobs, preview);
+  const screenedCount = columns.screened_out.length;
+  const trackedCount = jobs.length - screenedCount;
 
   const findColumnOf = (id: number): JobStatus | null => {
     for (const status of JOB_STATUSES) {
@@ -122,16 +155,19 @@ export function Board() {
     const toStatus = resolveOverColumn(over.id);
     if (!fromStatus || !toStatus || fromStatus === toStatus) return;
 
-    const target = columns[toStatus];
-    let index = target.length;
-    if (typeof over.id === "number") {
-      const overIndex = target.findIndex((j) => j.id === over.id);
-      if (overIndex !== -1) {
-        const activeRect = active.rect.current.translated;
-        const isBelow =
-          activeRect !== null &&
-          activeRect.top > over.rect.top + over.rect.height / 2;
-        index = overIndex + (isBelow ? 1 : 0);
+    let index = SCORE_INDEX;
+    if (!SCORE_SORTED_STATUSES.has(toStatus)) {
+      const target = columns[toStatus];
+      index = target.length;
+      if (typeof over.id === "number") {
+        const overIndex = target.findIndex((j) => j.id === over.id);
+        if (overIndex !== -1) {
+          const activeRect = active.rect.current.translated;
+          const isBelow =
+            activeRect !== null &&
+            activeRect.top > over.rect.top + over.rect.height / 2;
+          index = overIndex + (isBelow ? 1 : 0);
+        }
       }
     }
     setPreview((prev) =>
@@ -153,6 +189,15 @@ export function Board() {
     if (!over || !activeJob) return;
     const status = findColumnOf(activeId);
     if (!status) return;
+
+    // Score-sorted columns own their order — a drop is a status change
+    // only, and dragging within the column is a no-op.
+    if (SCORE_SORTED_STATUSES.has(status)) {
+      if (status !== activeJob.status) {
+        updateJob.mutate({ id: activeId, input: { status } });
+      }
+      return;
+    }
 
     const list = columns[status];
     const from = list.findIndex((j) => j.id === activeId);
@@ -217,11 +262,15 @@ export function Board() {
           </h1>
           {data && (
             <span className="hidden font-mono text-[11px] text-faint sm:inline">
-              {jobs.length} tracked
+              {trackedCount} tracked
+              {screenedCount > 0 && ` · ${screenedCount} screened`}
             </span>
           )}
         </div>
-        <UnmatchedTray />
+        <div className="flex shrink-0 items-center gap-2">
+          <ThresholdControl />
+          <UnmatchedTray />
+        </div>
       </header>
 
       <main className="flex flex-1 gap-3 overflow-x-auto overflow-y-hidden p-3">
