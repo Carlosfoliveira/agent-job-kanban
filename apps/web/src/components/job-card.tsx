@@ -2,11 +2,39 @@ import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useNavigate } from "@tanstack/react-router";
-import { Mail } from "lucide-react";
+import { Archive, Mail } from "lucide-react";
+import { useUpdateJob } from "@/lib/queries";
 import { formatRelative } from "@/lib/time";
 import type { Job } from "@/lib/types";
 import { useNow } from "@/lib/use-now";
 import { cn } from "@/lib/utils";
+
+/**
+ * Hover-revealed control that files a card away into the Archived column.
+ * Sits in-flow beside the score badge; reuses the status PATCH and stops
+ * pointer/click from starting a drag or opening the detail sheet. Hidden
+ * on cards that are already archived.
+ */
+function ArchiveButton({ job }: { job: Job }) {
+  const updateJob = useUpdateJob();
+  if (job.status === "archived") return null;
+
+  return (
+    <button
+      type="button"
+      title="Archive"
+      aria-label={`Archive ${job.title}`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        updateJob.mutate({ id: job.id, input: { status: "archived" } });
+      }}
+      className="shrink-0 rounded p-0.5 text-faint opacity-0 transition-opacity hover:bg-ink/70 hover:text-bone focus-visible:opacity-100 group-hover:opacity-100"
+    >
+      <Archive size={13} strokeWidth={2} />
+    </button>
+  );
+}
 
 /** Amber indicator lamp while there is unseen mail; quiet when caught up. */
 function MailIndicator({ job }: { job: Job }) {
@@ -107,7 +135,10 @@ function CardInner({ job }: { job: Job }) {
         <h3 className="line-clamp-2 text-[13px] leading-snug font-semibold text-bone">
           {job.title}
         </h3>
-        <ScoreBadge job={job} />
+        <span className="flex shrink-0 items-center gap-1">
+          <ScoreBadge job={job} />
+          <ArchiveButton job={job} />
+        </span>
       </div>
       <p className="mt-0.5 truncate text-xs text-mist">{job.company}</p>
       {job.techTags && job.techTags.length > 0 && (
@@ -124,7 +155,7 @@ function CardInner({ job }: { job: Job }) {
 }
 
 const CARD_CLASS =
-  "cursor-grab rounded-md border border-line bg-card px-3 py-2.5 transition-colors select-none hover:border-mist/40 hover:bg-card-raised active:cursor-grabbing";
+  "group cursor-grab rounded-md border border-line bg-card px-3 py-2.5 transition-colors select-none hover:border-mist/40 hover:bg-card-raised active:cursor-grabbing";
 
 export function JobCard({ job }: { job: Job }) {
   const navigate = useNavigate();

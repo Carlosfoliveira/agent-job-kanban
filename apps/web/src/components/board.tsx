@@ -121,7 +121,8 @@ export function Board() {
   const jobs = data?.jobs ?? [];
   const columns = buildColumns(jobs, preview);
   const screenedCount = columns.screened_out.length;
-  const trackedCount = jobs.length - screenedCount;
+  const trackedCount =
+    jobs.length - screenedCount - columns.archived.length;
 
   const findColumnOf = (id: number): JobStatus | null => {
     for (const status of JOB_STATUSES) {

@@ -19,6 +19,7 @@ export const COLUMNS: ColumnDef[] = [
   { status: "interview", label: "Interview", sortable: true },
   { status: "offer", label: "Offer", sortable: true },
   { status: "rejected", label: "Rejected", sortable: true },
+  { status: "archived", label: "Archived", sortable: true },
 ];
 
 /** Columns whose card order is derived from scores, not sortOrder. */

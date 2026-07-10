@@ -31,6 +31,15 @@
   --color-stage-interview: #56c2d6;
   --color-stage-offer: #5fc98e;
   --color-stage-rejected: #c46f6f;
+  --color-stage-archived: #5f6874;
+}
+
+/* Tailwind v4 resets buttons to cursor: default; restore the pointer. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
 
 html,

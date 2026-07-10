@@ -13,6 +13,7 @@ export const JOB_STATUSES = [
   "interview",
   "offer",
   "rejected",
+  "archived",
 ] as const;
 
 const jobStatusSchema = z.enum(JOB_STATUSES);
@@ -39,6 +40,7 @@ const patchJobSchema = z
     score: z.number().min(1).max(5).nullable().optional(),
     scoreBreakdown: scoreBreakdownSchema.nullable().optional(),
     techTags: z.array(z.string()).max(20).nullable().optional(),
+    description: z.string().nullable().optional(),
   })
   .refine(
     (data) =>
@@ -46,10 +48,11 @@ const patchJobSchema = z
       data.sortOrder !== undefined ||
       data.score !== undefined ||
       data.scoreBreakdown !== undefined ||
-      data.techTags !== undefined,
+      data.techTags !== undefined ||
+      data.description !== undefined,
     {
       message:
-        "At least one of status, sortOrder, score, scoreBreakdown, or techTags must be provided",
+        "At least one of status, sortOrder, score, scoreBreakdown, techTags, or description must be provided",
     },
   );
 
@@ -181,7 +184,9 @@ export function createJobsRouter(db: DbClient) {
 
     const existing = await findJobByLinkedinId(db, data.linkedinJobId);
     if (existing) {
-      return c.json({ duplicate: true, job: existing });
+      // Reply with just the outcome + id; the scraper doesn't need the row
+      // (esp. the multi-KB description) echoed back, and it wastes tokens.
+      return c.json({ duplicate: true, id: existing.id });
     }
 
     const now = new Date().toISOString();
@@ -205,12 +210,12 @@ export function createJobsRouter(db: DbClient) {
         })
         .returning();
 
-      return c.json({ duplicate: false, job }, 201);
+      return c.json({ duplicate: false, id: job.id }, 201);
     } catch (err) {
       if (isUniqueConstraintError(err)) {
         const raced = await findJobByLinkedinId(db, data.linkedinJobId);
         if (raced) {
-          return c.json({ duplicate: true, job: raced });
+          return c.json({ duplicate: true, id: raced.id });
         }
       }
       throw err;
@@ -230,7 +235,7 @@ export function createJobsRouter(db: DbClient) {
       return c.json({ error: parsed.error.flatten() }, 400);
     }
 
-    const { status, sortOrder, score, scoreBreakdown, techTags } = parsed.data;
+    const { status, sortOrder, score, scoreBreakdown, techTags, description } = parsed.data;
     const updates: Partial<typeof jobs.$inferInsert> = {
       updatedAt: new Date().toISOString(),
     };
@@ -239,6 +244,7 @@ export function createJobsRouter(db: DbClient) {
     if (score !== undefined) updates.score = score;
     if (scoreBreakdown !== undefined) updates.scoreBreakdown = scoreBreakdown;
     if (techTags !== undefined) updates.techTags = techTags;
+    if (description !== undefined) updates.description = description;
 
     const [job] = await db
       .update(jobs)

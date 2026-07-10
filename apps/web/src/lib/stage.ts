@@ -65,6 +65,12 @@ export const STAGE_STYLES: Record<JobStatus, StageStyle> = {
     ring: "ring-stage-rejected/50",
     dot: "bg-stage-rejected",
   },
+  archived: {
+    rail: "bg-stage-archived/50",
+    chip: "bg-stage-archived/10 text-stage-archived",
+    ring: "ring-stage-archived/50",
+    dot: "bg-stage-archived",
+  },
 };
 
 /** "action_needed" -> "Action Needed", derived from the column defs. */

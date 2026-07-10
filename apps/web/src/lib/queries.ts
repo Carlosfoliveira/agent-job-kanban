@@ -70,6 +70,46 @@ export function useUpdateJob() {
   });
 }
 
+/** Bulk-archive: one optimistic cache patch, one PATCH per job in flight. */
+export function useArchiveJobs() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (ids: number[]) =>
+      Promise.all(ids.map((id) => api.updateJob(id, { status: "archived" }))),
+    onMutate: async (ids: number[]) => {
+      await queryClient.cancelQueries({ queryKey: jobsQueryKey });
+
+      const previousJobs = queryClient.getQueryData<JobsResponse>(
+        jobsQueryKey,
+      );
+
+      const idSet = new Set(ids);
+      queryClient.setQueryData<JobsResponse>(jobsQueryKey, (old) => {
+        if (!old) return old;
+        return {
+          jobs: old.jobs.map((job): Job =>
+            idSet.has(job.id) ? { ...job, status: "archived" } : job,
+          ),
+        };
+      });
+
+      return { previousJobs };
+    },
+    onError: (_err, _ids, context) => {
+      if (context?.previousJobs) {
+        queryClient.setQueryData<JobsResponse>(
+          jobsQueryKey,
+          context.previousJobs,
+        );
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: jobsQueryKey });
+    },
+  });
+}
+
 export function useDeleteJob() {
   const queryClient = useQueryClient();
 

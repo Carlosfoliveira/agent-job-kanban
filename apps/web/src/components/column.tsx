@@ -3,8 +3,9 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { Archive } from "lucide-react";
 import type { ColumnDef } from "@/lib/columns";
-import { useSettings } from "@/lib/queries";
+import { useArchiveJobs, useSettings } from "@/lib/queries";
 import { STAGE_STYLES } from "@/lib/stage";
 import type { Job } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -13,6 +14,7 @@ import { JobCard, ScoreOrderedJobCard } from "./job-card";
 export function Column({ def, jobs }: { def: ColumnDef; jobs: Job[] }) {
   const { setNodeRef, isOver } = useDroppable({ id: def.status });
   const { data: settings } = useSettings();
+  const archiveJobs = useArchiveJobs();
   const stage = STAGE_STYLES[def.status];
 
   const list = (
@@ -64,6 +66,18 @@ export function Column({ def, jobs }: { def: ColumnDef; jobs: Job[] }) {
         >
           {jobs.length}
         </span>
+        {def.status !== "archived" && jobs.length > 0 && (
+          <button
+            type="button"
+            title={`Archive all ${jobs.length} ${jobs.length === 1 ? "job" : "jobs"} in ${def.label}`}
+            aria-label={`Archive all jobs in ${def.label}`}
+            disabled={archiveJobs.isPending}
+            onClick={() => archiveJobs.mutate(jobs.map((j) => j.id))}
+            className="rounded p-0.5 text-faint transition-colors hover:bg-ink/70 hover:text-bone disabled:opacity-50"
+          >
+            <Archive size={13} strokeWidth={2} />
+          </button>
+        )}
       </header>
       {def.sortable ? (
         <SortableContext
