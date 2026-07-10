@@ -1,6 +1,33 @@
+---
+name: linkedin-scraper
+description: Browses LinkedIn (via Chrome) for new job postings matching Carlos's search, checks each one against `GET /api/jobs/exists`, and inserts new ones via `POST /api/jobs` into the `inbox` column
+---
+
 # LinkedIn Job Scraper Playbook
 
 You are a scheduled agent. Follow these steps in order, exactly. Do not skip steps. Do not improvise data. Never run `git commit`.
+
+## 0. Ensure Chrome has an OPEN WINDOW with the Carlos profile
+
+A running Chrome **process** is not enough: on macOS Chrome stays resident in the background after its last window closes, and with zero windows the MCP extension cannot connect. You need process AND at least one open window. The launch command below is safe to run in every case — if Chrome isn't running it starts it; if it's already running it just opens a new window in the Carlos profile:
+
+```bash
+open -na "Google Chrome" --args --profile-directory="Default"
+```
+
+Procedure:
+
+1. Check the process: `pgrep -x "Google Chrome"`.
+   - Not running → run the launch command, wait ~4 seconds, go to step 3.
+2. Process is running → check for open windows:
+   ```bash
+   osascript -e 'tell application "Google Chrome" to count windows' 2>/dev/null
+   ```
+   - If the result is `0`, empty, or the command errors → Chrome is window-less in the background: run the launch command, wait ~3 seconds.
+   - If ≥ 1 window exists, proceed as-is.
+3. Verify connectivity by calling `tabs_context_mcp` with `createIfEmpty: true` (after loading Chrome tools in step 2 below). If it errors with "extension disconnected" or similar, run the launch command once more, wait ~5 seconds, and retry once. If it still fails, log "Chrome extension not connectable" and STOP.
+
+- **NEVER use `Profile 4`** — that is the "Turing" work profile (carlos.o@turing.com). Profile directory `Default` is the **Carlos** profile (carlos.fe.oliveira@gmail.com). If you ever observe (via screenshot or page content) that the active window is the Turing profile, do not proceed with it; open a Carlos-profile window with the launch command instead.
 
 ## 1. Health check
 
@@ -13,12 +40,12 @@ curl http://localhost:3001/api/health
 - If it still fails: log the failure clearly (e.g. "Backend health check failed after retry, aborting run") and STOP. Do not proceed.
 - At any later point in this run, if any API call returns a 5xx status, treat it as fatal: log the failure and STOP immediately. Never guess-insert data and never continue past a failed API call.
 
-## 2. Load Chrome tools
+## 2. Load Chrome tools and open the search
 
 Call `ToolSearch` once with:
 
 ```
-select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__javascript_tool
+select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__javascript_tool,mcp__claude-in-chrome__get_page_text
 ```
 
 Then:
@@ -32,76 +59,125 @@ https://www.linkedin.com/jobs/search/?f_E=4&f_TPR=r86400&f_WT=2&geoId=106057199&
 
 ## 3. Auth check
 
-If the page shows a login wall / authwall (a login/join form instead of job results): log "LinkedIn not logged in" and STOP. Never attempt to log in, enter credentials, or click through a login prompt.
+If the page shows a login wall / authwall (a login/join form instead of job results): log "LinkedIn not logged in" and STOP. Never attempt to log in, enter credentials, or click through a login prompt. The same applies to any "unusual activity" / CAPTCHA interstitial: log it and STOP.
 
-## 4. Collect the job list on the current page
+## 4. Determine page count and dispatch page agents
 
-The results list is virtualized — only visible rows are hydrated with real text; others render as placeholders. To collect all ~25 items on a page:
+1. Read the total result count from the header (e.g. "51 results"): it appears near the top of the results list; via JS you can read it from the text of the banner above the list. Compute `pages = ceil(count / 25)`, **capped at 4 pages** (the search is already limited to the past 24 hours, so more than ~100 results indicates something unexpected — process the first 4 pages and note the cap in the summary).
+2. Page N corresponds to the search URL with `&start=<25 × (N-1)>` appended (page 1 = `start=0`... you may omit `start` for page 1 since the tab is already there).
+3. **If there is more than 1 page, run pages in parallel**: spawn one subagent per page via the `Agent` tool, all in a single message so they run concurrently. Give each agent: the exact page URL (verbatim base URL + its `start` offset), the full text of the "Page procedure" section below, and the API reference. Each agent must create its **own tab** (`tabs_context_mcp`, then `tabs_create_mcp`) and work only in that tab.
+4. If there is only 1 page, execute the Page procedure yourself in the current tab.
+5. Collect every agent's summary and aggregate them for the final summary. Because the feed can shift while agents run, two agents may occasionally process the same job — this is safe: `POST /api/jobs` is idempotent on `linkedinJobId` (the loser gets `duplicate:true`; don't count it as an insert, don't treat it as an error).
 
-1. Run:
+## 5. Page procedure (run per page, in its own tab)
+
+### 5a. Collect the 25 job IDs — no scrolling needed
+
+Navigate to the page URL, wait for the list to render, then run:
+
 ```js
-document.querySelectorAll('[data-occludable-job-id]').length
+Array.from(document.querySelectorAll('[data-occludable-job-id]')).map(li => li.getAttribute('data-occludable-job-id'))
 ```
-2. Scroll the list container stepwise (not the whole page) and re-run the query + read title/company text after each scroll step, until every item's title and company text is populated (non-empty, not a placeholder skeleton).
-3. For each `<li>`, record: `data-occludable-job-id`, title text, company text.
+
+The `data-occludable-job-id` attribute is present on ALL rows immediately, **even unhydrated placeholder rows** — you do not need to scroll or hydrate anything to collect IDs. (See "Known quirks" below if you're tempted to read titles from the list.)
 
 If this selector matches nothing, inspect the DOM yourself, find the current equivalent, adapt, and note the drift in the final summary.
 
-## 5. Process items strictly top to bottom
+### 5b. Batch-check all IDs against the API
 
-The page is sorted newest-first (`sortBy=DD`), so order matters. For each collected item, in order:
+Check every collected ID in one Bash loop **before** extracting anything:
 
-1. `GET /api/jobs/exists?linkedinJobId=<data-occludable-job-id>`
-2. If `exists: true` — this and everything after it on LinkedIn is already in the system. **STOP THE ENTIRE RUN immediately.** This is a hard stop, not a skip: do not process further items on this page or any further page.
-3. If `exists: false` — this is a new job:
-   - Click the card (scroll it into view, then click) so the right-hand detail pane loads it.
-   - Wait briefly for the pane to update.
-   - Read from the pane via `javascript_tool`:
-     - Title, company, location, posted-time, workplace type from the top card elements: `.job-details-jobs-unified-top-card__*` (workplace type shows as a pill of text like "Remote", "Hybrid", or "On-site").
-     - Full description: `document.querySelector('#job-details').innerText`.
-   - If the pane fails to load after 2 attempts (retry once), log which job id/title was skipped and why, then **SKIP** this job only — continue to the next item. Do not stop the run for this.
-   - Otherwise, `POST /api/jobs` with:
-     ```json
-     {
-       "linkedinJobId": "<id>",
-       "title": "<title>",
-       "company": "<company>",
-       "location": "<location>",
-       "workplaceType": "<Remote|Hybrid|On-site>",
-       "description": "<full description text>",
-       "url": "https://www.linkedin.com/jobs/view/<id>",
-       "postedAt": "<posted time text/derived value>",
-       "status": "inbox"
-     }
-     ```
-   - A `201` with `duplicate:false` means it was inserted; count it. A `200` with `duplicate:true` means it already existed (race condition) — do not count it as a new insert, but do not treat this as an error or a stop condition either.
+```bash
+for id in <id1> <id2> ...; do
+  echo "$id: $(curl -s "http://localhost:3001/api/jobs/exists?linkedinJobId=$id")"
+done
+```
 
-## 6. Pagination
+- IDs with `exists:true` are already in the system — skip them individually. **Do not stop the run because of one duplicate**: reposts and promoted items shuffle the newest-first order, so new jobs routinely appear *below* known ones.
+- IDs with `exists:false` are the work list for this page.
+- If **every** ID on the page already exists, the page yields nothing — report "entire page duplicates" in your summary (see stop rule in step 6).
 
-After finishing a page with no duplicate hit (i.e. every item on the page was new or skipped):
+### 5c. Extract and insert each new job
 
-1. Click the next-page button: `button.jobs-search-pagination__button--next`.
-2. If that button is absent or disabled, there are no more pages — you are done.
-3. If present, click it, wait for the new page's job list to load, and repeat step 4 onward for the new page.
+For each `exists:false` ID, in order:
 
-If this selector matches nothing, inspect the DOM, find the current equivalent, adapt, and note the drift in the final summary.
+1. Navigate your tab directly to `https://www.linkedin.com/jobs/view/<id>`. (Direct navigation avoids the virtualized-list click dance entirely, which is what makes parallel pages safe.)
+2. **Force the tab to render, then wait for the description to hydrate.** The job-view page hydrates the "About the job" panel ONLY when the tab actually renders a frame. Background/hidden tabs never render, so the panel stays a skeleton loader FOREVER — no amount of waiting helps, and this is exactly the situation for every parallel page agent (only one tab in the window is visible). A `computer` screenshot forces Chrome to render the tab even when hidden, which triggers hydration within ~2s:
+   1. Take a `computer` screenshot of your tab (action: `screenshot`). You don't need to look at it — its purpose is the forced render.
+   2. Check hydration with a cheap JS probe: `document.querySelector('main').innerText.includes('About the job')`.
+   3. If `false`: wait 2s, screenshot again, re-probe. Repeat up to 5 cycles (~15s total).
+   4. Still `false` after 5 cycles → treat as render failure: log the job id and reason, **SKIP** this job only, continue to the next. Do not stop the run for this. (Genuinely description-less listings exist but are rare — never conclude "no description" without completing all 5 forced-render cycles.)
+3. **Read the FULL page text with `get_page_text`** (NOT `javascript_tool` — see Known quirks: its output truncates at ~1k chars). `get_page_text` returns the entire page text in one call with no length limit. Parse from it:
+   - **company** = 1st non-empty line, **title** = 2nd, **locLine** = 3rd (looks like `Brazil · 1 hour ago · 13 applicants`).
+   - **location** = the part of locLine before the first `·`; **posted-relative** = the `N <unit> ago` fragment of locLine (a `Reposted` prefix is fine).
+   - **workplaceType** = the first standalone line among the pill lines (between locLine and `Easy Apply`/`Apply`) that is exactly `Remote`, `Hybrid`, or `On-site`.
+   - **description** = everything from the line `About the job` up to (not including) the first of these end markers: `Set alert for similar jobs`, `This job alert is on` (shown instead when an alert already exists), `Put your best foot forward`, `Applicants for this job`, `More jobs`, `LinkedIn Corporation`. Strip a trailing `… more` line if present. (The full text is present in the DOM even while visually collapsed behind the `… more` button — expanding is not required for extraction.)
+   - **NEVER truncate, cap, summarize, or paraphrase the description. Store the full text verbatim, however long it is.** A multi-KB description is expected and fine. If you catch yourself shortening it "to save tokens", stop — full fidelity is the whole point of this scraper; the job-scorer agent depends on it.
+4. **postedAt as ISO**: convert the relative text at extraction time (relative text like "14 minutes ago" is useless a day later). One small `javascript_tool` call:
+   ```js
+   function toIso(txt){
+     const m = (txt||'').match(/(\d+)\s+(minute|hour|day|week|month)s?\s+ago/i);
+     if(!m) return txt; // unparseable: store the raw text
+     const ms = {minute:6e4, hour:36e5, day:864e5, week:6048e5, month:2592e6}[m[2].toLowerCase()];
+     return new Date(Date.now() - (+m[1])*ms).toISOString();
+   }
+   toIso("<posted-relative text>");
+   ```
+   ("Reposted 16 hours ago" parses fine — the regex ignores the prefix.)
+5. POST via **curl from Bash** (heredoc for the JSON body):
+   ```json
+   {
+     "linkedinJobId": "<id>",
+     "title": "<title>",
+     "company": "<company>",
+     "location": "<location>",
+     "workplaceType": "<Remote|Hybrid|On-site>",
+     "description": "<full description text>",
+     "url": "https://www.linkedin.com/jobs/view/<id>",
+     "postedAt": "<ISO timestamp from toIso()>",
+     "status": "inbox"
+   }
+   ```
+   The response is compact (`{duplicate, id}`): `201 {duplicate:false, id}` = inserted, count it; `200 {duplicate:true, ...}` = race, don't count it, don't treat as error.
+6. Pace yourself: the forced-render cycles already space out navigations; don't remove them to go faster. Do not hammer LinkedIn with rapid-fire navigations — if you hit an unusual-activity/CAPTCHA page, stop your page immediately and report it.
+
+### 5d. Page summary
+
+Return: page number, IDs found, how many already existed, list of inserted jobs (id + title + company), list of skipped jobs (id + reason), any selector drift, any LinkedIn interstitial encountered.
+
+## 6. Stop rules (orchestrator)
+
+- Natural end: all pages (up to the cap) processed.
+- If a page reports **entire page duplicates**, pages after it are very likely all duplicates too — but since page agents run in parallel and each inserts only its own `exists:false` items, no action is needed; idempotency makes over-processing harmless.
+- If running sequentially (single page or fallback): stop after the first page that yields zero new jobs, or after 2 consecutive pages where duplicates were the majority.
+- If ANY page hit an authwall/CAPTCHA, or any API call returned 5xx, surface that as the run's stop reason.
 
 ## 7. Final summary
 
 End every run — success, early stop, or error — by printing one paragraph covering:
 
-- Number of jobs inserted (count only true `duplicate:false` inserts).
+- Total jobs inserted (count only true `duplicate:false` inserts), aggregated across all page agents.
 - List of any skipped jobs (id/title + reason).
-- The stop reason: `duplicate <id> encountered` / `end of results (no more pages)` / `error: <description>`.
-- Any selector drift you had to work around.
+- The stop reason: `all pages processed` / `entire page duplicates` / `page cap reached` / `error: <description>`.
+- Any selector drift any agent had to work around.
+
+## Known quirks (read before improvising)
+
+- **Hidden tabs never hydrate the job description** (root cause of the 2026-07-10 bad run): the `/jobs/view/<id>` page loads its "About the job" panel only when the tab renders a frame. A hidden/background tab renders nothing, so the panel sits on skeleton loaders indefinitely — a 45s poll was observed to find nothing, then a single `computer` screenshot (which forces a render even for hidden tabs) hydrated it within ~2s. Parallel page agents share one window, so all but one tab is always hidden: the screenshot-then-probe loop in 5c.2 is MANDATORY, not an optimization. Never interpret a skeleton as "this job has no description".
+- **`javascript_tool` output truncates at ~1k chars** — a full description read through it needs a dozen chunked calls, and past agents "solved" that by capping the description (data corruption). Use `get_page_text` for anything long; it returns full page text in one call. Keep `javascript_tool` for short probes and computed values only.
+- **`/jobs/view/` pages have obfuscated CSS class names**: `#job-details` and `.job-details-jobs-unified-top-card__*` exist only on the search page's right-hand pane, NOT on standalone job-view pages (which ship hashed classes like `_1aa780e9`). On job-view pages, parse from text structure (see 5c.3), not selectors.
+- **Virtualized list hydration**: on the search results page, only rows near the viewport are hydrated with title/company text; the rest are empty placeholders. Setting `scrollTop` via JavaScript does NOT trigger hydration — only **real mouse scrolls** (the `computer` tool's `scroll` action on the list) do. This playbook avoids the problem by never needing hydrated list text (IDs are always present; details come from `/jobs/view/<id>`), but if you ever must read the list, use real mouse scrolls — and know that mouse actions need tab focus, so they are NOT safe while parallel agents share the browser.
+- **In-page `fetch` to the local API is CSP-blocked**: LinkedIn's Content-Security-Policy silently blocks `fetch('http://localhost:3001/...')` from `javascript_tool` — the call returns an empty result and nothing reaches the API. Always POST/GET the API via `curl` from Bash.
+- **Chrome extension disconnects**: the extension can drop mid-run ("Selected Chrome extension disconnected"). Call `tabs_context_mcp` (without `createIfEmpty`) to re-attach and retry the failed call once before treating it as an error.
+- **The result set mutates mid-run**: the count can grow and items can shift between pages while you work. This is why order-based assumptions (like "first duplicate means everything below is known") are unreliable, and why inserts are idempotent.
 
 ## API reference
 
 - `GET /api/health` — health check.
 - `GET /api/jobs/exists?linkedinJobId=<id>` → `{ exists }`
-- `POST /api/jobs` `{ linkedinJobId, title, company, location, workplaceType, description, url, postedAt, status? }` → `201 { duplicate: false }` (inserted) or `200 { duplicate: true }` (already existed)
+- `POST /api/jobs` `{ linkedinJobId, title, company, location, workplaceType, description, url, postedAt, status? }` → `201 { duplicate: false, id }` (inserted) or `200 { duplicate: true, id }` (already existed). Idempotent on `linkedinJobId`.
 - `GET /api/jobs/search?company=<q>&title=<q>` → `{ jobs }` (case-insensitive partial match; use short distinctive fragments) — available if you need to cross-check a job, not required for the core flow.
-- `PATCH /api/jobs/:id` `{ status }` — status one of `screened_out|inbox|applied|action_needed|waiting|interview|offer|rejected` — not used in this playbook, listed for reference.
+- `PATCH /api/jobs/:id` `{ status?, description? }` — status one of `screened_out|inbox|applied|action_needed|waiting|interview|offer|rejected`; `description` allows repairing a job whose description was scraped badly — not used in the core flow, listed for reference.
 - `POST /api/jobs/:id/emails` `{ gmailMessageId, gmailThreadId, subject, sender, snippet, receivedAt, classification }` — idempotent on `gmailMessageId` — not used in this playbook.
 - `POST /api/emails` — same shape, no job — idempotent — not used in this playbook.
 - `GET /api/jobs` → `{ jobs }` full list — available for debugging, not required for the core flow.

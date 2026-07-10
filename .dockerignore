@@ -1,0 +1,20 @@
+# Dependencies (installed fresh inside the image)
+node_modules
+**/node_modules
+
+# Live data — must never be baked into an image; it's bind-mounted instead
+data
+
+# Build outputs (regenerated inside the image)
+dist
+**/dist
+
+# VCS / editor / OS cruft
+.git
+.gitignore
+.DS_Store
+
+# Not needed by the Docker build
+profile
+agents
+*.md

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createTestApp, readJson, type JobRow, type TestApp } from "./test-utils";
 
-type JobResponse = { duplicate: boolean; job: JobRow };
+type JobResponse = { duplicate: boolean; id: number };
 type JobsListResponse = {
   jobs: (JobRow & { emailCount: number; unseenCount: number })[];
 };
@@ -26,23 +26,37 @@ async function postJson(app: TestApp, path: string, body: unknown) {
 }
 
 describe("POST /api/jobs", () => {
-  it("inserts a new job and returns 201", async () => {
+  it("inserts a new job and returns 201 with just the outcome and id", async () => {
     const { app } = createTestApp();
     const res = await postJson(app, "/api/jobs", jobPayload());
 
     expect(res.status).toBe(201);
     const data = await readJson<JobResponse>(res);
     expect(data.duplicate).toBe(false);
-    expect(data.job).toMatchObject({
-      linkedinJobId: "job-1",
-      title: "Software Engineer",
-      company: "Acme Corp",
-      status: "inbox",
-    });
-    expect(data.job.id).toBeGreaterThan(0);
+    expect(data.id).toBeGreaterThan(0);
+    // The response carries no echoed row — just success + id.
+    expect(Object.keys(data).sort()).toEqual(["duplicate", "id"]);
   });
 
-  it("returns duplicate:true with the existing job on repeat insert", async () => {
+  it("does not echo the job body or description on insert", async () => {
+    const { app } = createTestApp();
+    const res = await postJson(
+      app,
+      "/api/jobs",
+      jobPayload({ description: "x".repeat(5000) }),
+    );
+
+    const data = await readJson<Record<string, unknown>>(res);
+    expect(data.job).toBeUndefined();
+    expect(data.description).toBeUndefined();
+
+    // The full description is still stored and returned by GET /api/jobs.
+    const list = await readJson<JobsListResponse>(await app.request("/api/jobs"));
+    const stored = list.jobs.find((j) => j.id === (data.id as number));
+    expect(stored?.description).toBe("x".repeat(5000));
+  });
+
+  it("returns duplicate:true with the existing id on repeat insert", async () => {
     const { app } = createTestApp();
     const first = await postJson(app, "/api/jobs", jobPayload());
     const firstBody = await readJson<JobResponse>(first);
@@ -56,9 +70,12 @@ describe("POST /api/jobs", () => {
     expect(second.status).toBe(200);
     const secondBody = await readJson<JobResponse>(second);
     expect(secondBody.duplicate).toBe(true);
-    expect(secondBody.job.id).toBe(firstBody.job.id);
+    expect(secondBody.id).toBe(firstBody.id);
+
     // The original row is untouched, not overwritten with the new payload.
-    expect(secondBody.job.title).toBe("Software Engineer");
+    const list = await readJson<JobsListResponse>(await app.request("/api/jobs"));
+    const stored = list.jobs.find((j) => j.id === firstBody.id);
+    expect(stored?.title).toBe("Software Engineer");
   });
 
   it("rejects invalid payloads with 400", async () => {
@@ -92,7 +109,7 @@ describe("PATCH /api/jobs/:id", () => {
       await postJson(app, "/api/jobs", jobPayload()),
     );
 
-    const res = await app.request(`/api/jobs/${created.job.id}`, {
+    const res = await app.request(`/api/jobs/${created.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "applied" }),
@@ -102,9 +119,7 @@ describe("PATCH /api/jobs/:id", () => {
     const body = await readJson<{ job: JobRow }>(res);
     expect(body.job.status).toBe("applied");
     expect(typeof body.job.updatedAt).toBe("string");
-    expect(new Date(body.job.updatedAt ?? "").getTime()).toBeGreaterThanOrEqual(
-      new Date(created.job.updatedAt ?? "").getTime(),
-    );
+    expect(Number.isNaN(new Date(body.job.updatedAt ?? "").getTime())).toBe(false);
   });
 
   it("updates sortOrder", async () => {
@@ -113,7 +128,7 @@ describe("PATCH /api/jobs/:id", () => {
       await postJson(app, "/api/jobs", jobPayload()),
     );
 
-    const res = await app.request(`/api/jobs/${created.job.id}`, {
+    const res = await app.request(`/api/jobs/${created.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sortOrder: 42.5 }),
@@ -121,6 +136,23 @@ describe("PATCH /api/jobs/:id", () => {
 
     const body = await readJson<{ job: JobRow }>(res);
     expect(body.job.sortOrder).toBe(42.5);
+  });
+
+  it("updates description", async () => {
+    const { app } = createTestApp();
+    const created = await readJson<JobResponse>(
+      await postJson(app, "/api/jobs", jobPayload()),
+    );
+
+    const res = await app.request(`/api/jobs/${created.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: "Full re-scraped description text" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await readJson<{ job: JobRow }>(res);
+    expect(body.job.description).toBe("Full re-scraped description text");
   });
 
   it("404s for an unknown job", async () => {
@@ -172,7 +204,7 @@ describe("POST /api/jobs/:id/score", () => {
       await postJson(app, "/api/jobs", jobPayload()),
     );
 
-    const res = await postJson(app, `/api/jobs/${created.job.id}/score`, {
+    const res = await postJson(app, `/api/jobs/${created.id}/score`, {
       score: 2.5,
       scoreBreakdown: { culture: 2, tech: 3 },
       techTags: ["typescript", "react"],
@@ -192,7 +224,7 @@ describe("POST /api/jobs/:id/score", () => {
       await postJson(app, "/api/jobs", jobPayload()),
     );
 
-    const res = await postJson(app, `/api/jobs/${created.job.id}/score`, {
+    const res = await postJson(app, `/api/jobs/${created.id}/score`, {
       score: 3.0,
     });
 
@@ -207,13 +239,13 @@ describe("POST /api/jobs/:id/score", () => {
     const created = await readJson<JobResponse>(
       await postJson(app, "/api/jobs", jobPayload()),
     );
-    await app.request(`/api/jobs/${created.job.id}`, {
+    await app.request(`/api/jobs/${created.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "applied" }),
     });
 
-    const res = await postJson(app, `/api/jobs/${created.job.id}/score`, {
+    const res = await postJson(app, `/api/jobs/${created.id}/score`, {
       score: 2.5,
     });
 
@@ -229,7 +261,7 @@ describe("POST /api/jobs/:id/score", () => {
       await postJson(app, "/api/jobs", jobPayload()),
     );
 
-    const res = await postJson(app, `/api/jobs/${created.job.id}/score`, {
+    const res = await postJson(app, `/api/jobs/${created.id}/score`, {
       score: 6,
     });
 
@@ -249,7 +281,7 @@ describe("DELETE /api/jobs/:id", () => {
     const created = await readJson<JobResponse>(
       await postJson(app, "/api/jobs", jobPayload()),
     );
-    const jobId = created.job.id;
+    const jobId = created.id;
 
     await postJson(app, `/api/jobs/${jobId}/emails`, { gmailMessageId: "gm-1" });
     await postJson(app, `/api/jobs/${jobId}/emails`, { gmailMessageId: "gm-2" });
@@ -289,7 +321,7 @@ describe("GET /api/jobs email aggregates", () => {
     const created = await readJson<JobResponse>(
       await postJson(app, "/api/jobs", jobPayload()),
     );
-    const jobId = created.job.id;
+    const jobId = created.id;
 
     await postJson(app, `/api/jobs/${jobId}/emails`, {
       gmailMessageId: "m1",

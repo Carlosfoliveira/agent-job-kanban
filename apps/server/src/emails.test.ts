@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { createTestApp, readJson, type EmailRow, type JobRow, type TestApp } from "./test-utils";
+import { createTestApp, readJson, type EmailRow, type TestApp } from "./test-utils";
 
-type JobResponse = { duplicate: boolean; job: JobRow };
+type JobResponse = { duplicate: boolean; id: number };
 type EmailResponse = { duplicate: boolean; email: EmailRow };
 type EmailsListResponse = { emails: EmailRow[] };
 
@@ -22,10 +22,10 @@ async function postJson(app: TestApp, path: string, body: unknown) {
   });
 }
 
-async function createJob(app: TestApp): Promise<JobRow> {
+async function createJob(app: TestApp): Promise<{ id: number }> {
   const res = await postJson(app, "/api/jobs", jobPayload());
   const body = await readJson<JobResponse>(res);
-  return body.job;
+  return { id: body.id };
 }
 
 describe("POST /api/jobs/:id/emails", () => {

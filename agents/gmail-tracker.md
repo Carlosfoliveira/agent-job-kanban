@@ -18,15 +18,24 @@ Call `ToolSearch` once with `select:mcp__claude_ai_Gmail__search_threads,mcp__cl
 
 ## 2. Find candidate emails
 
-Run two searches with `search_threads`:
+Companies rarely email only through LinkedIn — most follow-ups (assessments, interview invites, rejections) come from the company's own domain or an ATS, often with subjects that don't contain obvious keywords. So run **three** kinds of searches with `search_threads` and dedupe threads across them:
 
-1. Primary pass:
+1. Keyword/LinkedIn pass:
    `newer_than:2d in:anywhere {from:jobs-noreply@linkedin.com from:linkedin.com subject:application subject:interview subject:assessment subject:offer subject:recruiter subject:applying}`
-2. Spam sweep (job-related mail sometimes lands in spam):
+2. **Board-driven company pass** (this is what catches direct-from-company mail):
+   - Fetch `GET /api/jobs` and collect the distinct company names on the board.
+   - For each company, derive a short distinctive search fragment: strip legal/generic suffixes (`Inc`, `LLC`, `Group`, `Co`, `Corp`, `Ltd`, `Global`, `Solutions`, `Consulting`, `Oficial`, `do Brasil`) and keep the distinctive part — e.g. "Gramian Consulting" -> `"Gramian"`, "Emma of Torre.ai" -> `"Torre.ai"`, "Sigma Software Group" -> `"Sigma Software"`.
+   - **Skip fragments that are common English/Portuguese words** ("Reply", "FullStack", "Montreal", "Worldly", "WE ARE HIRING") — they return noise, not signal. A fragment is usable if it would be surprising to see in a non-job email.
+   - Chunk the fragments ~10 per query and run one search per chunk:
+     `newer_than:2d in:anywhere {"frag1" "frag2" ... "frag10"}`
+     Quoted phrases match sender names, subjects, AND bodies, so this finds company mail regardless of the sending address.
+3. Spam sweep (job-related mail sometimes lands in spam):
    `in:spam newer_than:2d`
    From the results, keep only threads that look job-related (application/interview/assessment/offer/recruiter/rejection language, or from known ATS domains).
 
-Known senders/domains in Carlos's inbox to recognize as job-related: `jobs-noreply@linkedin.com`, `linkedin.com`, `workablemail.com`, `ashbyhq.com`, `greenhouse-mail.io`, `teamtailor-mail.com`, `deel.com`, `coderpad.io`.
+From all passes, keep only threads that are genuinely job-related. Discard LinkedIn job-alert digests, connection/InMail social notifications, billing emails, and newsletters that merely mention a company name.
+
+Known senders/domains in Carlos's inbox to recognize as job-related: `jobs-noreply@linkedin.com`, `linkedin.com`, `workablemail.com`, `ashbyhq.com`, `greenhouse-mail.io`, `teamtailor-mail.com`, `deel.com`, `coderpad.io`, `micro1.ai`, `torre.ai`, `hirehangar.com`, `breakmarkhr.com`, `luflox.com`, `unlockcareer.ai`, `proxify.io`, `gympass.com` (Wellhub's ATS sender), `rippling.com` (ATS, e.g. `ats.rippling.com`), `devsu.com`. **When a run discovers a new job-related sender domain not in this list, append it to this list in both copies of this playbook** (`agents/gmail-tracker.md` in the repo and `~/.claude/scheduled-tasks/gmail-tracker/SKILL.md`) so future runs recognize it.
 
 For each candidate thread, call `get_thread` to pull the message(s): `gmailMessageId`, `gmailThreadId`, `subject`, `sender`, a short `snippet` (body excerpt, a sentence or two), and `receivedAt`.
 
@@ -44,10 +53,15 @@ Assign exactly one classification:
 
 For each candidate message (do this before deciding whether to skip it — see step 5):
 
-1. Extract the company name and role title from the email (subject + snippet + sender domain).
+1. Extract the company name and role title from the email using ALL available signals:
+   - subject and snippet/body text
+   - **sender domain**: `no-reply@torre.ai` -> "Torre.ai", `recruiting@luflox.com` -> "Luflox". The domain is often the strongest company signal when the body doesn't name the company (ATS mail like coderpad.io excepted — that domain identifies the tool, not the company; look in the subject/body instead).
+   - **thread continuity**: if another message in the same `gmailThreadId` was already matched to a job (this run or a previous one), the new message belongs to the same job — reuse that job id without re-searching.
 2. Normalize the company name: strip legal suffixes like `Inc`, `LLC`, `Group`, `Co`, `Corp`, `Ltd`.
 3. Call `GET /api/jobs/search?company=<fragment>` using a short, distinctive fragment of the normalized name. If that's ambiguous, also try `GET /api/jobs/search?title=<fragment>` with a role-title fragment.
 4. Judge the candidates returned. Email company names often differ slightly from the LinkedIn listing (e.g. "Gramian Consulting Group" in an email vs. "Gramian Consulting" on the job card) — use judgment, but only match when you're genuinely confident it's the same job/company. **Never invent or force a match.**
+   - Company match alone is NOT enough when the email names a clearly different role than the card (e.g. an email about "Customer Service Representative" at a company whose card is "Front-End UI Developer") — unless it's obviously the same hiring pipeline (recruiters sometimes send generic-role InMails for a specific application). When the email explicitly references *applying* and the timing lines up with the card, prefer matching; when it reads like an unrelated vacancy, leave unmatched.
+   - If a company has multiple cards on the board (e.g. micro1), match by role title; if no title fits, leave unmatched rather than guessing.
 5. Confident match found -> a job id to use in step 6.
 6. No confident match -> treat as unmatched (step 6 uses `/api/emails` instead).
 
@@ -80,11 +94,19 @@ Rules:
 - When genuinely torn between two possible triage moves for the same message, pick the less advanced one — except rejection/offer, which always apply regardless of current stage.
 - Fetch current status first if needed via `GET /api/jobs` (full list) or by inspecting the search result from step 4.
 
-## 8. Final summary (always print this, even on partial failure)
+## 8. Retro-match previously unmatched emails
+
+After processing new mail, fetch `GET /api/emails/unmatched`. For each email there, re-run the step-4 matching logic (sender domain, company/role extraction, thread continuity). Cards are sometimes added to the board *after* the email arrived, so an email unmatched last run may match now.
+
+- Confident match found -> `PATCH /api/emails/:id {jobId: X}` to link it, then apply the step-7 triage rules to card X using that email's classification (same never-move-backwards constraints).
+- Still no match -> leave it; do not dismiss anything.
+
+## 9. Final summary (always print this, even on partial failure)
 
 One paragraph covering:
-- How many candidate emails were found and processed
+- How many candidate emails were found and processed (and which search pass surfaced them)
 - How many matched to a job card vs. were recorded as unmatched (`/api/emails`)
+- How many previously unmatched emails were retro-linked in step 8
 - How many were duplicates/already processed (skipped)
 - Every card status change, as `Company — Role: old_status -> new_status`
 - Any errors or anomalies encountered

@@ -42,7 +42,9 @@ export interface DeleteJobResponse {
 
 export interface CreateJobResponse {
   duplicate: boolean;
-  job: Job;
+  /** Id of the created (or existing, on duplicate) job. The full row is not
+   * echoed back — fetch it via getJobs() if needed. */
+  id: number;
 }
 
 export interface ExistsResponse {

@@ -33,6 +33,23 @@ bun run dev
 
 The SQLite file lives at `data/app.db` (gitignored, created on first run).
 
+### Run with Docker
+
+```bash
+docker compose up --build
+```
+
+This builds and runs both apps in containers:
+
+- server → http://localhost:3001
+- web → http://localhost:5173
+
+`data/app.db` is bind-mounted into the server container, so the containerized API reads and writes the same database file as the host (including the host-side scheduled agents) — nothing is duplicated or reset.
+
+> **Warning:** Don't run `bun run dev` at the same time as the Docker stack — both bind to ports 3001 and 5173 and will conflict. Stop one before starting the other.
+
+Bring the stack down with `docker compose down` (the containers are opt-in; `bun run dev` remains the normal day-to-day flow).
+
 ## Scripts
 
 Run from the repo root:
