@@ -1,0 +1,13 @@
+{
+  "name": "agent-job-kanban",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "server": "bun run --filter server dev",
+    "lint": "bun run --filter '*' lint",
+    "test": "cd apps/server && bun test"
+  }
+}

@@ -1,0 +1,81 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+/*
+ * Cockpit palette: deep blue-slate ink, one warm amber signal reserved for
+ * unseen mail, and seven muted stage hues that carry pipeline information.
+ */
+@theme {
+  --font-sans:
+    "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono:
+    "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  --color-ink: #10151a;
+  --color-panel: #151b21;
+  --color-card: #1c242c;
+  --color-card-raised: #232d37;
+  --color-line: #29323c;
+  --color-bone: #e9edf1;
+  --color-mist: #8c99a6;
+  --color-faint: #5c6a77;
+
+  --color-signal: #f0b54a;
+
+  --color-stage-inbox: #94a3b3;
+  --color-stage-applied: #6ca5e0;
+  --color-stage-action: #e88352;
+  --color-stage-waiting: #a896e3;
+  --color-stage-interview: #56c2d6;
+  --color-stage-offer: #5fc98e;
+  --color-stage-rejected: #c46f6f;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: var(--color-bone);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Calm, thin scrollbars everywhere. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-faint);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
