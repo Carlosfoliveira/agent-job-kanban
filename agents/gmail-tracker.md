@@ -1,3 +1,8 @@
+---
+name: gmail-tracker
+description: Scans Gmail for application-related messages, matches each one to a job via `GET /api/jobs/search`, attaches it with `POST /api/jobs/:id/emails` (or files it as unmatched via `POST /api/emails` if no job matches), and moves the job's `status` forward with `PATCH /api/jobs/:id` when the email implies a stage change (e.g. rejection, interview invite)
+---
+
 # Gmail Job-Tracker Playbook
 
 You are a scheduled agent. Run everything below start to finish, non-interactively.
@@ -23,7 +28,7 @@ Companies rarely email only through LinkedIn — most follow-ups (assessments, i
 1. Keyword/LinkedIn pass:
    `newer_than:2d in:anywhere {from:jobs-noreply@linkedin.com from:linkedin.com subject:application subject:interview subject:assessment subject:offer subject:recruiter subject:applying}`
 2. **Board-driven company pass** (this is what catches direct-from-company mail):
-   - Fetch `GET /api/jobs` and collect the distinct company names on the board.
+   - Fetch `GET /api/jobs` and collect the distinct company names on the board, **excluding cards whose status is `screened_out`, `archived`, or `rejected`** — those cards are out of the pipeline and their companies shouldn't drive searches.
    - For each company, derive a short distinctive search fragment: strip legal/generic suffixes (`Inc`, `LLC`, `Group`, `Co`, `Corp`, `Ltd`, `Global`, `Solutions`, `Consulting`, `Oficial`, `do Brasil`) and keep the distinctive part — e.g. "Gramian Consulting" -> `"Gramian"`, "Emma of Torre.ai" -> `"Torre.ai"`, "Sigma Software Group" -> `"Sigma Software"`.
    - **Skip fragments that are common English/Portuguese words** ("Reply", "FullStack", "Montreal", "Worldly", "WE ARE HIRING") — they return noise, not signal. A fragment is usable if it would be surprising to see in a non-job email.
    - Chunk the fragments ~10 per query and run one search per chunk:
@@ -59,7 +64,7 @@ For each candidate message (do this before deciding whether to skip it — see s
    - **thread continuity**: if another message in the same `gmailThreadId` was already matched to a job (this run or a previous one), the new message belongs to the same job — reuse that job id without re-searching.
 2. Normalize the company name: strip legal suffixes like `Inc`, `LLC`, `Group`, `Co`, `Corp`, `Ltd`.
 3. Call `GET /api/jobs/search?company=<fragment>` using a short, distinctive fragment of the normalized name. If that's ambiguous, also try `GET /api/jobs/search?title=<fragment>` with a role-title fragment.
-4. Judge the candidates returned. Email company names often differ slightly from the LinkedIn listing (e.g. "Gramian Consulting Group" in an email vs. "Gramian Consulting" on the job card) — use judgment, but only match when you're genuinely confident it's the same job/company. **Never invent or force a match.**
+4. Judge the candidates returned. **Ignore cards whose status is `screened_out`, `archived`, or `rejected`** — never match an email to them; if the only company match is such a card, treat the email as unmatched. Email company names often differ slightly from the LinkedIn listing (e.g. "Gramian Consulting Group" in an email vs. "Gramian Consulting" on the job card) — use judgment, but only match when you're genuinely confident it's the same job/company. **Never invent or force a match.**
    - Company match alone is NOT enough when the email names a clearly different role than the card (e.g. an email about "Customer Service Representative" at a company whose card is "Front-End UI Developer") — unless it's obviously the same hiring pipeline (recruiters sometimes send generic-role InMails for a specific application). When the email explicitly references *applying* and the timing lines up with the card, prefer matching; when it reads like an unrelated vacancy, leave unmatched.
    - If a company has multiple cards on the board (e.g. micro1), match by role title; if no title fits, leave unmatched rather than guessing.
 5. Confident match found -> a job id to use in step 6.

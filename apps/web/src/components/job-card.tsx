@@ -36,30 +36,32 @@ function ArchiveButton({ job }: { job: Job }) {
   );
 }
 
-/** Amber indicator lamp while there is unseen mail; quiet when caught up. */
+/** Mail pill always shows the total count; the amber glow only burns while
+ * there is unseen mail, dimming to quiet grey once caught up. */
 function MailIndicator({ job }: { job: Job }) {
   if (job.emailCount === 0) return null;
 
-  if (job.unseenCount > 0) {
-    return (
-      <span
-        title={`${job.unseenCount} unseen ${job.unseenCount === 1 ? "email" : "emails"}`}
-        className="flex items-center gap-1 rounded-full bg-signal/15 px-1.5 py-0.5 text-signal shadow-[0_0_10px_rgba(240,181,74,0.25)]"
-      >
-        <Mail size={12} strokeWidth={2.25} />
-        <span className="font-mono text-[10px] leading-none font-semibold">
-          {job.unseenCount}
-        </span>
-      </span>
-    );
-  }
+  const unseen = job.unseenCount > 0;
 
   return (
-    <Mail
-      size={12}
-      className="text-faint"
-      aria-label={`${job.emailCount} ${job.emailCount === 1 ? "email" : "emails"}, all seen`}
-    />
+    <span
+      title={
+        unseen
+          ? `${job.unseenCount} unseen of ${job.emailCount} ${job.emailCount === 1 ? "email" : "emails"}`
+          : `${job.emailCount} ${job.emailCount === 1 ? "email" : "emails"}, all seen`
+      }
+      className={cn(
+        "flex items-center gap-1 rounded-full px-1.5 py-0.5",
+        unseen
+          ? "bg-signal/15 text-signal shadow-[0_0_10px_rgba(240,181,74,0.25)]"
+          : "bg-ink/50 text-faint",
+      )}
+    >
+      <Mail size={12} strokeWidth={2.25} />
+      <span className="font-mono text-[10px] leading-none font-semibold">
+        {job.emailCount}
+      </span>
+    </span>
   );
 }
 
