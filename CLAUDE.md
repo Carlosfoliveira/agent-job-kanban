@@ -1,0 +1,50 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A single-user, local-only job-application kanban. The board is populated by three scheduled Claude Code agents (playbooks in `agents/`), not manual entry. The README covers the product, API table, columns, and agent scheduling in detail — read it for anything user-facing. This file covers what you need to change code safely.
+
+## Commands
+
+```bash
+bun install
+bun run dev        # server :3001 + web :5173, watch mode
+bun run server     # API only
+bun run lint       # ESLint, both workspaces
+bun run test       # server test suite (bun test; there are no web tests)
+```
+
+- Single test file: `cd apps/server && bun test src/jobs.test.ts`
+- Single test by name: `cd apps/server && bun test -t "name substring"`
+- Typecheck (not part of lint): `bunx tsc --noEmit` inside `apps/server` or `apps/web`
+
+**Deployment gotcha:** the live board usually runs as Docker containers (`docker compose up -d --build`), with `data/app.db` bind-mounted from the host. Code changes are NOT live until the containers are rebuilt. Never run `bun run dev` while the Docker stack is up — both bind :3001/:5173. `data/app.db` holds real personal data; tests use an in-memory DB (`test-utils.ts`), so never point manual destructive experiments at :3001.
+
+## Architecture
+
+Bun workspaces monorepo with three API clients: the React web app, and the two write-side agent playbooks (`agents/linkedin-scraper.md`, `agents/gmail-tracker.md`) plus the scorer — scheduled Claude sessions that follow the playbooks verbatim and talk to the API only, never the DB.
+
+### Server (`apps/server`) — Hono + Drizzle + bun:sqlite
+
+- `app.ts` is a factory taking a `DbClient` so tests inject in-memory SQLite; `index.ts` binds the real DB and hardcodes port 3001.
+- **Schema lives in two places and both must be updated together**: `db/schema.ts` (Drizzle, used by queries) and raw DDL strings in `db/client.ts` executed at boot (`CREATE TABLE IF NOT EXISTS`). There is no migration-file workflow — a new column additionally goes into the `MIGRATIONS` array in `client.ts` so existing DB files get `ALTER TABLE`d forward; a new table is just another CREATE string.
+- **bun-sqlite transactions commit when the callback returns** — `db.transaction` callbacks must be synchronous (use `.all()`/`.get()`, never `await` inside), or the statements silently run outside the transaction.
+- **The server owns state transitions the agents must not make**: `POST /jobs/:id/score` atomically moves `inbox` → `screened_out` when the score is under the `screen_out_threshold` setting; `PATCH /api/settings` reconciles existing jobs across that boundary in both directions; `POST /api/jobs` rejects banned companies (`{banned:true}`) as a backstop.
+- **Idempotency contracts the agents depend on**: `POST /api/jobs` on `linkedinJobId`, email inserts on `gmailMessageId`. Deleting a job *tombstones* its emails (`jobId` null, `dismissed` set) instead of deleting rows — the gmail-tracker rescans ~2 days of mail and its dedupe needs `gmailMessageId` rows to survive. Never hard-delete emails.
+- Mutation responses to the scraper are deliberately compact (`{duplicate, id}` — no row echo): scraped descriptions are multi-KB and echoing them wastes agent tokens.
+
+### Web (`apps/web`) — React 19 (compiler) + TanStack + Tailwind v4 + dnd-kit
+
+Data flows `lib/api.ts` (fetch wrapper) → `lib/queries.ts` (TanStack Query hooks; mutations do optimistic cache patches on `jobsQueryKey` with rollback in `onError`) → components. Column/status config is data in `lib/columns.ts` and `lib/stage.ts` — adding a status means touching those plus the server's `JOB_STATUSES` in `routes/jobs.ts`. Styling uses the custom Tailwind tokens already in the files (`text-faint`, `text-mist`, `border-line`, `bg-card`, `stage-*`); match them.
+
+### Agent playbooks (`agents/*.md`)
+
+- Each playbook is mirrored at `~/.claude/scheduled-tasks/<name>/SKILL.md` for the Claude Desktop scheduled tasks. **The repo copy and the Desktop copy must stay byte-identical — every playbook edit is a two-file edit.**
+- The playbooks encode hard-won LinkedIn/Chrome workarounds (hidden-tab hydration, CSP blocking localhost fetches, virtualized lists) in their "Known quirks" sections — read those before changing scraper behavior, and never let an agent truncate or summarize a scraped job description.
+- Playbooks fail closed: health check first, any 5xx is fatal for the run, never guess-insert data.
+
+### Scoring profile (`profile/`)
+
+`cv.md` and `profile.yml` are gitignored (repo is public, files are personal) and copied from `../career-ops` (`cp ../career-ops/cv.md ../career-ops/config/profile.yml profile/`). `../career-ops/config/profile.yml` is the source of truth — edits to comp/location/targets go there first, then re-copy.

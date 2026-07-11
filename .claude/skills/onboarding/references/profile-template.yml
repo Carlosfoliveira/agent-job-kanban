@@ -1,0 +1,47 @@
+# Scoring Profile — single source of truth for personal data.
+# Filled by the /onboarding skill. Read by the job-scorer agent (agents/job-scorer.md).
+# This file is gitignored: it contains personal data and the repo may be public.
+
+candidate:
+  full_name: ""
+  email: ""
+  phone: ""                 # optional
+  location: ""              # "City, Region, Country"
+  linkedin: ""              # "linkedin.com/in/..."
+  github: ""                # optional
+
+target_roles:
+  # North Star roles — what the search is optimizing for.
+  primary:
+    - ""                    # e.g. "Senior Full Stack Engineer"
+  # Archetypes drive the scorer's North Star block (25% of the score).
+  # fit: primary = dream role, secondary = good fit, adjacent = stretch.
+  archetypes:
+    - name: ""              # e.g. "Full Stack Engineer"
+      level: ""             # e.g. "Senior"
+      fit: "primary"
+
+narrative:
+  headline: ""              # one-line professional headline
+  exit_story: ""            # 1-2 sentences: career arc and what's next
+  superpowers:              # top 3-5 differentiators, each one line
+    - ""
+  proof_points:             # projects/results with a measurable hero metric
+    - name: ""
+      hero_metric: ""
+
+compensation:
+  # Drives the scorer's Comp block (15%). Postings without comp data score
+  # neutral (3) — these targets only matter when a posting states a range.
+  target_range: ""          # e.g. "$90K-130K"
+  currency: "USD"
+  minimum: ""               # walk-away floor, e.g. "$60K"
+  location_flexibility: ""  # e.g. "Remote (UTC-3, strong US overlap)"
+
+location:
+  # visa_status drives the scorer's Red Flags block: postings requiring work
+  # authorization the candidate lacks get heavily penalized.
+  country: ""
+  city: ""
+  timezone: ""              # e.g. "America/Recife (UTC-3)"
+  visa_status: ""           # e.g. "No sponsorship needed" or "Brazil-based; remote/contractor-friendly roles preferred"

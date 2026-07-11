@@ -7,19 +7,17 @@ fresh on every run.
 - `profile.yml` — target roles, compensation targets, location/visa status,
   narrative.
 
-## Refreshing
+## Populating
 
-These files come from `career-ops`, not from this repo. Copy the latest
-versions in with:
-
-```bash
-cp ../career-ops/cv.md ../career-ops/config/profile.yml profile/
-```
+Run the `/onboarding` skill in Claude Code from the repo root — it generates
+both files from your resume plus a short interview (and personalizes the
+agent playbooks while it's at it). You can also edit the files by hand
+afterwards; the scorer reads them fresh each run.
 
 ## Why gitignored
 
-This repo is public. `cv.md` and `profile.yml` contain personal data (name,
-contact info, compensation targets, immigration/visa status) that must never
-be committed. `.gitignore` excludes everything under `profile/` except this
-README and `.gitkeep`, so the directory itself still exists in a fresh clone
-— just run the `cp` command above to populate it.
+This repo may be public. `cv.md` and `profile.yml` contain personal data
+(name, contact info, compensation targets, immigration/visa status) that must
+never be committed. `.gitignore` excludes everything under `profile/` except
+this README and `.gitkeep`, so the directory itself still exists in a fresh
+clone — just run `/onboarding` to populate it.

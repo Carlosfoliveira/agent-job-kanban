@@ -1,201 +1,142 @@
 # agent-job-kanban
 
-A personal job-application kanban board. Three scheduled Claude Code agents keep it
-up to date automatically: one finds new LinkedIn postings, one reads Gmail
-for application-related replies, and one scores each posting against Carlos's
-resume so low-fit jobs screen themselves out. Carlos only touches the board to
-drag cards and read email snippets.
+A self-updating job-application kanban board, run by Claude Code agents.
 
-## What this is
+Three scheduled agents do the busywork: one scrapes LinkedIn for new postings that match your search, one scores every posting against your resume so poor fits screen themselves out, and one reads your Gmail and moves cards forward when recruiters reply. You just drag cards and show up to interviews.
 
-- A kanban board (8 columns, see below) backed by a local SQLite database.
-- Fed by three Claude Code agents that run on a schedule (2x/day each), not by
-  manual data entry.
-- Single-user, local-only. No auth, no deployment — it runs on Carlos's Mac.
+<!-- TODO: replace with a real screenshot of the board -->
+![Kanban board](docs/screenshot.png)
+
+## How it works
+
+```
+LinkedIn ──(scraper agent, 2x/day)──▶ ┌─────────────────┐
+                                      │  Hono + SQLite   │ ◀──── React board
+Gmail ────(tracker agent, 2x/day)──▶  │  API on :3001    │       on :5173
+                                      └─────────────────┘
+your resume ──(scorer agent, 2x/day)──────────▲
+```
+
+- **LinkedIn scraper** — browses your saved LinkedIn search in your own Chrome (via the Claude in Chrome extension), extracts each new posting's full description, and inserts it into the **Inbox** column. Skips duplicates and companies you've banned.
+- **Job scorer** — scores every unscored job 1–5 against `profile/cv.md` + `profile/profile.yml` on a weighted rubric (CV match 35%, target-role fit 25%, comp 15%, culture 15%, red flags 10%). The **server** — never the agent — moves low scorers from Inbox to **Screened Out** based on a threshold you control from the UI.
+- **Gmail tracker** — scans recent mail for application-related messages (read-only), attaches them to the matching card, and moves the card's status forward (interview invite → Interview, rejection → Rejected, …). Never moves cards backwards. Unmatched mail lands in a tray in the UI for manual linking.
+
+The agents are plain-Markdown playbooks in [`agents/`](agents/) that scheduled Claude Code sessions follow verbatim. They talk to the API only — never the database — and fail closed: health check first, any server error aborts the run, and no data is ever written on a guess.
+
+Everything is **single-user and local-only**: no auth, no cloud, one SQLite file.
 
 ## Stack
 
-- **Backend**: Bun + [Hono](https://hono.dev) + [Drizzle ORM](https://orm.drizzle.team) over SQLite (`data/app.db`), validated with Zod.
+- **Backend**: [Bun](https://bun.sh) + [Hono](https://hono.dev) + [Drizzle ORM](https://orm.drizzle.team) over SQLite (`data/app.db`), validated with Zod.
 - **Frontend**: React 19 (with the React Compiler) + Vite, [TanStack Router](https://tanstack.com/router) and [TanStack Query](https://tanstack.com/query), Tailwind CSS v4, drag-and-drop via [dnd-kit](https://dndkit.com).
 - **Monorepo**: Bun workspaces (`apps/server`, `apps/web`).
+- **Agents**: [Claude Code](https://claude.com/claude-code) Desktop app (local scheduled tasks + the Claude in Chrome extension + the Gmail connector).
 
 ## Getting started
+
+### 1. Run the app
 
 ```bash
 bun install
 bun run dev
 ```
 
-`bun run dev` starts both apps in parallel:
-
 - server → http://localhost:3001
 - web → http://localhost:5173
 
 The SQLite file lives at `data/app.db` (gitignored, created on first run).
 
-### Run with Docker
+Or with Docker:
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-This builds and runs both apps in containers:
+`data/app.db` is bind-mounted into the server container, so the containerized API shares the same database as the host-side agents. Don't run `bun run dev` and the Docker stack at the same time — they bind the same ports. Remember that container code is only updated on `--build`.
 
-- server → http://localhost:3001
-- web → http://localhost:5173
+### 2. Onboard yourself
 
-`data/app.db` is bind-mounted into the server container, so the containerized API reads and writes the same database file as the host (including the host-side scheduled agents) — nothing is duplicated or reset.
+Open the repo in Claude Code and run:
 
-> **Warning:** Don't run `bun run dev` at the same time as the Docker stack — both bind to ports 3001 and 5173 and will conflict. Stop one before starting the other.
+```
+/onboarding
+```
 
-Bring the stack down with `docker compose down` (the containers are opt-in; `bun run dev` remains the normal day-to-day flow).
+The wizard asks for your resume and a short set of questions, then:
 
-## Scripts
+1. generates `profile/cv.md` and `profile/profile.yml` (both gitignored — they're personal),
+2. sets **your** LinkedIn search URL in the scraper playbook,
+3. rewrites the playbooks' absolute paths and Chrome profile for your machine,
+4. installs the playbooks as Claude Desktop scheduled-task skills,
+5. walks you through scheduling the three routines.
 
-Run from the repo root:
+### 3. Schedule the routines
 
-| Script | Command | Does |
+The agents must run as **local scheduled tasks in the Claude Code Desktop app** — cloud routines can't reach your Chrome or `localhost`. In the Desktop app: Routines → New task → **Local**, working directory = this repo, model Sonnet:
+
+| Task | Time (local) | Prompt |
 |---|---|---|
-| `bun run dev` | `bun run --filter '*' dev` | Starts server + web together (watch mode). |
-| `bun run server` | `bun run --filter server dev` | Starts only the API server on :3001. |
-| `bun run lint` | `bun run --filter '*' lint` | Lints both apps (ESLint). |
-| `bun run test` | `cd apps/server && bun test` | Runs the server test suite (Bun's test runner). |
+| LinkedIn scraper | 09:00 & 18:00 | `Read <repo>/agents/linkedin-scraper.md and follow it exactly.` |
+| Job scorer | 09:15 & 18:15 | `Read <repo>/agents/job-scorer.md and follow it exactly.` |
+| Gmail tracker | 09:30 & 18:30 | `Read <repo>/agents/gmail-tracker.md and follow it exactly.` |
 
-## Repo layout
+The stagger matters: new jobs get scored (and screened out where warranted) before the tracker tries to match confirmation emails to them.
 
-```
-apps/
-  server/               Bun + Hono API
-    src/
-      index.ts           entrypoint, listens on :3001
-      app.ts              Hono app factory, mounts routers + CORS
-      db/
-        schema.ts          Drizzle schema (jobs, emails, settings tables)
-        client.ts           SQLite client factory + migrateDb()
-      routes/
-        jobs.ts             /api/jobs endpoints
-        emails.ts            /api/emails endpoints
-        settings.ts           /api/settings endpoints
-      *.test.ts            route tests
-  web/                  React 19 + Vite frontend
-    src/
-      components/         board, columns, job cards, email list, etc.
-      lib/                 API client, TanStack Query hooks, column/status config
-agents/
-  linkedin-scraper.md   Playbook for the LinkedIn scraper agent
-  gmail-tracker.md      Playbook for the Gmail tracker agent
-  job-scorer.md         Playbook for the job scorer agent
-data/
-  app.db                SQLite database (gitignored)
-profile/
-  cv.md                 Resume in Markdown (gitignored — see "Scoring profile" below)
-  profile.yml            Target roles, comp, location (gitignored)
-```
+Run-time preconditions: Mac awake; Chrome open and logged into LinkedIn (scraper); Gmail MCP connector connected in the Desktop app (tracker, read-only). The scorer only needs the API and `profile/` populated. Docs: https://code.claude.com/docs/en/desktop-scheduled-tasks.md
 
-## The three agents
+## The board
 
-The board is populated entirely by three scheduled Claude Code sessions running
-locally on Carlos's Mac. They all talk to the API only, never touch the
-database directly, and all open with the same contract:
+| Column | Meaning |
+|---|---|
+| Screened Out | Scored below your threshold. Still visible and recoverable — not deleted. |
+| Inbox | Newly scraped posting, nothing applied yet. |
+| Applied | Application submitted, no reply needing action. |
+| Action Needed | An email arrived that needs a response (assessment, screening call, question). |
+| Waiting | Applied and waiting — nothing pending on your side. |
+| Interview | Interview scheduled or in progress. |
+| Offer | Offer received. |
+| Rejected | Application rejected. |
+| Archived | Out of the running but kept for history. Cards and whole columns can be archived. |
 
-- **Health check first**: hit `GET /api/health`. If the server isn't up, start
-  it (`bun run server` from the repo root, in the background), wait ~2s, and
-  retry once. If it's still down, log the failure clearly and stop — no data
-  is written on a guess.
-- **Fail closed**: any 5xx response from the API is treated as fatal for that
-  run — log it and stop rather than retry blindly or fabricate data.
-- **Summarize on exit**: every run ends with a one-paragraph summary of what
-  it did (jobs added, statuses changed, emails matched, etc.).
-
-| Agent | Playbook | What it does | Schedule |
-|---|---|---|---|
-| LinkedIn scraper | [`agents/linkedin-scraper.md`](agents/linkedin-scraper.md) | Browses LinkedIn (via Chrome) for new job postings matching Carlos's search, checks each one against `GET /api/jobs/exists`, and inserts new ones via `POST /api/jobs` into the `inbox` column. | 2x/day |
-| Gmail tracker | [`agents/gmail-tracker.md`](agents/gmail-tracker.md) | Scans Gmail for application-related messages, matches each one to a job via `GET /api/jobs/search`, attaches it with `POST /api/jobs/:id/emails` (or files it as unmatched via `POST /api/emails` if no job matches), and moves the job's `status` forward with `PATCH /api/jobs/:id` when the email implies a stage change (e.g. rejection, interview invite). | 2x/day |
-| Job scorer | [`agents/job-scorer.md`](agents/job-scorer.md) | Reads unscored jobs (`score IS NULL`) via `GET /api/jobs`, scores each against `profile/cv.md` and `profile/profile.yml` on a weighted rubric, and submits the score via `POST /api/jobs/:id/score`. The server — not the agent — moves low-scoring `inbox` cards to `screened_out` based on the configurable threshold. | 2x/day |
-
-All three agents require, at run time: the Mac awake, Chrome open (LinkedIn
-scraper only), LinkedIn logged in (LinkedIn scraper only), and the Gmail MCP
-connector connected (Gmail tracker only). The job scorer only needs the API
-and `profile/` populated. If any precondition isn't true, the run should fail
-the health/precondition check rather than silently no-op.
-
-### Scheduling (Claude Code Desktop — local scheduled tasks)
-
-Cloud routines can't reach local Chrome or `localhost`, and headless
-`claude -p` can't drive the Chrome extension — so these agents must be
-scheduled as **local scheduled tasks in the Claude Code Desktop app**
-(persistent across restarts, run on this machine):
-
-1. Open the Claude Code Desktop app → **Routines / Scheduled tasks** → **New task (Local)**.
-2. Create the three tasks below, working directory `/Users/carlos/personal/agent-job-kanban`, model **Sonnet**:
-
-| Task | Schedule (local time) | Prompt |
-|---|---|---|
-| LinkedIn scraper | 09:00 and 18:00 daily | `Read /Users/carlos/personal/agent-job-kanban/agents/linkedin-scraper.md and follow it exactly.` |
-| Gmail tracker | 09:30 and 18:30 daily | `Read /Users/carlos/personal/agent-job-kanban/agents/gmail-tracker.md and follow it exactly.` |
-| Job scorer | 09:15 and 18:15 daily | `Read /Users/carlos/personal/agent-job-kanban/agents/job-scorer.md and follow it exactly.` |
-
-The tracker runs 30 minutes after the scraper so LinkedIn "application sent"
-confirmations from a morning application session match freshly inserted cards.
-The scorer runs in between (15 minutes after the scraper) so freshly scraped
-jobs get scored — and, where warranted, screened out — before the tracker's
-confirmation pass. If the app's scheduler only accepts one time per task,
-create two entries per agent (morning + evening). Docs: https://code.claude.com/docs/en/desktop-scheduled-tasks.md
+**Settings** (gear, top right): the screen-out threshold — moving it reconciles existing cards across the Inbox/Screened Out boundary in both directions — and the **banned companies** list. Ban a company from any card's detail sheet: its cards archive immediately and the scraper never inserts it again (the server also rejects banned companies as a backstop). Unban from Settings.
 
 ## API overview
 
-Base URL: `http://localhost:3001`. All job/email bodies are validated with Zod
-server-side; see `apps/server/src/routes/*.ts` for exact schemas.
+Base URL: `http://localhost:3001`. Bodies are Zod-validated server-side; see `apps/server/src/routes/*.ts` for exact schemas.
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | Liveness check, `{ok: true}`. |
 | GET | `/api/jobs` | Full job list with email counts. |
-| GET | `/api/jobs/exists?linkedinJobId=` | `{exists}` — dedupe check before inserting a scraped job. |
-| GET | `/api/jobs/search?company=&title=` | Case-insensitive partial match on company/title, used to link an email to a job. |
-| POST | `/api/jobs` | Create a job. Idempotent on `linkedinJobId` — 201 if new, 200 with `duplicate:true` if it already exists. |
-| PATCH | `/api/jobs/:id` | Update a job's `status`, `sortOrder`, `score`, `scoreBreakdown`, and/or `techTags`. Setting `score` to `null` re-queues a job for scoring. |
-| POST | `/api/jobs/:id/score` | Submit a score (`{score, scoreBreakdown?, techTags?}`) for a job. The server, not the caller, decides whether to move an `inbox` job to `screened_out` based on the `screen_out_threshold` setting. 404 if the job doesn't exist. |
-| DELETE | `/api/jobs/:id` | Delete a job. Its emails are tombstoned, not deleted (`jobId` set to `null`, `dismissed` set to `true`) — `gmailMessageId` rows survive so the Gmail tracker's idempotency check still works. 404 if the job doesn't exist. |
+| GET | `/api/jobs/exists?linkedinJobId=` | Dedupe check before inserting a scraped job. |
+| GET | `/api/jobs/search?company=&title=` | Case-insensitive partial match, used to link emails to jobs. |
+| POST | `/api/jobs` | Create a job. Idempotent on `linkedinJobId`; returns `{banned: true}` without inserting if the company is banned. |
+| PATCH | `/api/jobs/:id` | Update `status`, `sortOrder`, `score`, `scoreBreakdown`, `techTags`, or `description`. Setting `score` to `null` re-queues scoring. |
+| POST | `/api/jobs/:id/score` | Submit a score. The server decides whether the job moves to `screened_out` (threshold setting). |
+| DELETE | `/api/jobs/:id` | Delete a job. Its emails are tombstoned, not deleted, so the Gmail tracker's dedupe keeps working. |
 | POST | `/api/jobs/:id/emails` | Attach an email to a job. Idempotent on `gmailMessageId`. |
-| POST | `/api/emails` | Insert an email with no matching job (unmatched tray). Idempotent on `gmailMessageId`. |
-| GET | `/api/emails/unmatched` | Emails with no `jobId` and `dismissed = false` — surfaced in the UI's unmatched tray. |
-| PATCH | `/api/emails/:id` | Re-link an unmatched email to a job, and/or mark it seen or `dismissed`. Dismissed emails drop out of `/api/emails/unmatched`. |
-| GET | `/api/settings` | Current settings, e.g. `{screenOutThreshold: number}`. |
-| PATCH | `/api/settings` | Update a setting (e.g. `{screenOutThreshold: number}`). Reconciles existing jobs immediately — moves scored jobs across the `inbox` / `screened_out` boundary to match the new threshold and reports `{screenOutThreshold, moved: {toScreenedOut, toInbox}}`. |
+| POST | `/api/emails` | Insert an unmatched email (idempotent). |
+| GET | `/api/emails/unmatched` | Emails with no job, for the UI's unmatched tray. |
+| PATCH | `/api/emails/:id` | Re-link an unmatched email to a job, mark seen, or dismiss. |
+| GET | `/api/settings` | Current settings (`{screenOutThreshold}`). |
+| PATCH | `/api/settings` | Update the threshold; reconciles existing scored jobs immediately. |
+| GET | `/api/banned-companies` | List banned companies. |
+| POST | `/api/banned-companies` | Ban a company (`{company}`); archives its existing cards. Case-insensitive, idempotent. |
+| DELETE | `/api/banned-companies/:id` | Unban. Previously archived cards stay archived. |
 
-Job `status` is one of: `screened_out`, `inbox`, `applied`, `action_needed`,
-`waiting`, `interview`, `offer`, `rejected`. Email `classification` is one of:
-`confirmation`, `action_request`, `interview`, `rejection`, `offer`, `other`.
+Job `status` is one of: `screened_out`, `inbox`, `applied`, `action_needed`, `waiting`, `interview`, `offer`, `rejected`, `archived`. Email `classification` is one of: `confirmation`, `action_request`, `interview`, `rejection`, `offer`, `other`.
 
-## Kanban columns
+## The scoring profile
 
-| Column | Meaning |
-|---|---|
-| Screened Out | Scored below the configurable threshold (`screen_out_threshold` in settings, default `3.0`). Still visible and re-scoreable — not deleted. |
-| Inbox | Newly scraped posting. Nothing has been applied yet. |
-| Applied | Application submitted; no reply requiring action yet. |
-| Action Needed | An email came in that needs a response from Carlos (assessment, screening call request, follow-up question). |
-| Waiting | Applied and waiting to hear back — no action pending. |
-| Interview | An interview has been scheduled or is in progress. |
-| Offer | An offer has been received. |
-| Rejected | The application was rejected. |
+The scorer reads two gitignored files in `profile/`: `cv.md` (your resume as Markdown) and `profile.yml` (target roles/archetypes, compensation targets, location and visa status). `/onboarding` creates both; edit them any time — the scorer reads them fresh each run. If either is missing, the scorer logs the fact and stops rather than scoring blind. The full rubric lives in [`agents/job-scorer.md`](agents/job-scorer.md).
 
-## Scoring profile
-
-The job scorer agent scores every unscored job against two files in
-`profile/`: `cv.md` (resume) and `profile.yml` (target roles, compensation,
-location/visa status). Both are gitignored — this repo is public and those
-files contain personal data — but the directory itself is tracked (via
-`profile/README.md` and `profile/.gitkeep`) so a fresh clone still has
-somewhere to put them.
-
-Populate or refresh them from `career-ops`:
+## Development
 
 ```bash
-cp ../career-ops/cv.md ../career-ops/config/profile.yml profile/
+bun run dev      # server + web, watch mode
+bun run server   # API only
+bun run lint     # ESLint, both workspaces
+bun run test     # server test suite (bun test)
 ```
 
-If either file is missing, the job scorer logs a message with this same
-command and stops without scoring anything. See
-[`agents/job-scorer.md`](agents/job-scorer.md) for the full scoring rubric.
+Tests run against an in-memory SQLite database — they never touch `data/app.db`. If you edit an agent playbook, mirror the edit to its copy in `~/.claude/scheduled-tasks/<name>/SKILL.md`; the two must stay identical. See [`CLAUDE.md`](CLAUDE.md) for the architecture notes and invariants that keep the agents and server honest.

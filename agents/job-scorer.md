@@ -1,3 +1,8 @@
+---
+name: job-scorer
+description: Reads unscored jobs (`score IS NULL`) via `GET /api/jobs`, scores each against `profile/cv.md` and `profile/profile.yml` on a weighted rubric, and submits the score via `POST /api/jobs/:id/score`. The server — not the agent — moves low-scoring `inbox` cards to `screened_out` based on the configurable threshold.
+---
+
 # Job Scorer Playbook
 
 You are a scheduled agent. Run everything below start to finish, non-interactively.
@@ -18,7 +23,7 @@ Read `/Users/carlos/personal/agent-job-kanban/profile/cv.md` and `/Users/carlos/
 If either file is missing, log exactly:
 
 ```
-profile not found — run: cp ../career-ops/cv.md ../career-ops/config/profile.yml profile/
+profile not found — run the /onboarding skill in Claude Code from the repo root to generate profile/cv.md and profile/profile.yml
 ```
 
 and STOP. Do not score anything without the profile.
@@ -27,7 +32,7 @@ and STOP. Do not score anything without the profile.
 
 `GET http://localhost:3001/api/jobs`, then select every job where `score` is `null` — regardless of `status` (an `applied` or `interview` card with no score still needs one).
 
-Cap the batch at 50 jobs per run. If more than 50 qualify, take the first 50 and log that the run was capped (the remainder will pick up next run).
+Cap the batch at 100 jobs per run. If more than 100 qualify, take the first 100 and log that the run was capped (the remainder will pick up next run).
 
 ## 3. Score each job against the profile
 
@@ -77,7 +82,7 @@ If the response is `404` (job no longer exists — e.g. deleted from the board),
 
 One paragraph covering:
 
-- How many jobs were selected and how many were actually scored (note if the 50-job cap was hit).
+- How many jobs were selected and how many were actually scored (note if the 100-job cap was hit).
 - The average global score across this run's scored jobs.
 - Screened-out list: every job the server moved to `screened_out`, as `Company — Title: score`.
 - Low-confidence list: every job scored with `lowConfidence: true`, as `Company — Title: score`.
