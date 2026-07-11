@@ -1,4 +1,5 @@
 import type {
+  BannedCompany,
   Email,
   Job,
   NewEmailInput,
@@ -67,6 +68,20 @@ export interface AttachEmailResponse {
 
 export interface EmailResponse {
   email: Email;
+}
+
+export interface BannedCompaniesResponse {
+  companies: BannedCompany[];
+}
+
+export interface BanCompanyResponse {
+  banned: boolean;
+  /** How many existing cards the server archived as part of the ban. */
+  archived: number;
+}
+
+export interface UnbanCompanyResponse {
+  deleted: boolean;
 }
 
 export interface SettingsResponse {
@@ -153,6 +168,24 @@ export const api = {
     return request<EmailResponse>(`/api/emails/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ dismissed: true }),
+    });
+  },
+
+  // Banned companies
+  getBannedCompanies(): Promise<BannedCompaniesResponse> {
+    return request<BannedCompaniesResponse>("/api/banned-companies");
+  },
+
+  banCompany(company: string): Promise<BanCompanyResponse> {
+    return request<BanCompanyResponse>("/api/banned-companies", {
+      method: "POST",
+      body: JSON.stringify({ company }),
+    });
+  },
+
+  unbanCompany(id: number): Promise<UnbanCompanyResponse> {
+    return request<UnbanCompanyResponse>(`/api/banned-companies/${id}`, {
+      method: "DELETE",
     });
   },
 

@@ -56,6 +56,12 @@ export interface Job {
   unseenCount: number;
 }
 
+export interface BannedCompany {
+  id: number;
+  name: string;
+  createdAt: string | null;
+}
+
 export interface Email {
   id: number;
   jobId: number | null;

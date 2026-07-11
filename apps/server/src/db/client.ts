@@ -62,6 +62,15 @@ const CREATE_SETTINGS_TABLE = `
   );
 `;
 
+// when adding a column, also add it to MIGRATIONS
+const CREATE_BANNED_COMPANIES_TABLE = `
+  CREATE TABLE IF NOT EXISTS banned_companies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at TEXT DEFAULT (current_timestamp)
+  );
+`;
+
 const DEFAULT_SCREEN_OUT_THRESHOLD = "3.0";
 
 // Columns added after the initial CREATE TABLE strings above shipped. Kept
@@ -129,6 +138,7 @@ export function createDb(
   sqlite.exec(CREATE_JOBS_TABLE);
   sqlite.exec(CREATE_EMAILS_TABLE);
   sqlite.exec(CREATE_SETTINGS_TABLE);
+  sqlite.exec(CREATE_BANNED_COMPANIES_TABLE);
   migrateDb(sqlite);
   sqlite
     .query("INSERT OR IGNORE INTO settings (key, value) VALUES ('screen_out_threshold', ?)")

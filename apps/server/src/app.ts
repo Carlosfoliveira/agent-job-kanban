@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { DbClient } from "./db/client";
+import { createBannedCompaniesRouter } from "./routes/banned-companies";
 import { createEmailsRouter } from "./routes/emails";
 import { createJobsRouter } from "./routes/jobs";
 import { createSettingsRouter } from "./routes/settings";
@@ -21,6 +22,7 @@ export function createApp(db: DbClient) {
   app.route("/api/jobs", createJobsRouter(db));
   app.route("/api/emails", createEmailsRouter(db));
   app.route("/api/settings", createSettingsRouter(db));
+  app.route("/api/banned-companies", createBannedCompaniesRouter(db));
 
   return app;
 }

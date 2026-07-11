@@ -1,7 +1,12 @@
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { Building2, ExternalLink, MapPin, Trash2, X } from "lucide-react";
+import { Ban, Building2, ExternalLink, MapPin, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useDeleteJob, useJobs, useMarkJobEmailsSeen } from "@/lib/queries";
+import {
+  useBanCompany,
+  useDeleteJob,
+  useJobs,
+  useMarkJobEmailsSeen,
+} from "@/lib/queries";
 import { STAGE_STYLES, STATUS_LABELS } from "@/lib/stage";
 import { formatRelative } from "@/lib/time";
 import type { Job, ScoreBreakdown } from "@/lib/types";
@@ -201,6 +206,48 @@ function DeleteJobButton({ jobId }: { jobId: number }) {
   );
 }
 
+/**
+ * Same two-step confirm as delete: first click arms it
+ * ("Confirm ban {Company}?"), a second click within 3s bans; otherwise it
+ * quietly disarms. Banning archives the company's cards server-side.
+ */
+function BanCompanyButton({ company }: { company: string }) {
+  const navigate = useNavigate();
+  const banCompany = useBanCompany();
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(false), 3000);
+    return () => clearTimeout(timer);
+  }, [confirming]);
+
+  const handleClick = () => {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    banCompany.mutate(company);
+    void navigate({ to: "/" });
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={banCompany.isPending}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50",
+        confirming
+          ? "border-stage-rejected/50 bg-stage-rejected/10 font-medium text-stage-rejected hover:bg-stage-rejected/20"
+          : "border-line text-faint hover:border-stage-rejected/40 hover:text-stage-rejected",
+      )}
+    >
+      <Ban size={12} />
+      {confirming ? `Confirm ban ${company}?` : "Ban company"}
+    </button>
+  );
+}
+
 export function JobDetailSheet() {
   const { jobId } = route.useParams();
   const id = Number(jobId);
@@ -285,7 +332,8 @@ export function JobDetailSheet() {
                 )}
               </section>
             </div>
-            <footer className="flex shrink-0 justify-end border-t border-line px-5 py-3">
+            <footer className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-3">
+              <BanCompanyButton company={job.company} />
               <DeleteJobButton jobId={job.id} />
             </footer>
           </>

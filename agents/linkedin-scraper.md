@@ -39,6 +39,11 @@ curl http://localhost:3001/api/health
 - If it fails (connection refused / timeout): from `/Users/carlos/personal/agent-job-kanban` run `bun run server` in the background, wait ~2 seconds, then retry the health check once.
 - If it still fails: log the failure clearly (e.g. "Backend health check failed after retry, aborting run") and STOP. Do not proceed.
 - At any later point in this run, if any API call returns a 5xx status, treat it as fatal: log the failure and STOP immediately. Never guess-insert data and never continue past a failed API call.
+- Once the health check passes, fetch the banned-company list and keep it for the whole run:
+  ```
+  curl -s http://localhost:3001/api/banned-companies
+  ```
+  The list may be empty — that's normal, not an error. Pass it verbatim to every page agent in step 4.
 
 ## 2. Load Chrome tools and open the search
 
@@ -65,7 +70,7 @@ If the page shows a login wall / authwall (a login/join form instead of job resu
 
 1. Read the total result count from the header (e.g. "51 results"): it appears near the top of the results list; via JS you can read it from the text of the banner above the list. Compute `pages = ceil(count / 25)`, **capped at 4 pages** (the search is already limited to the past 24 hours, so more than ~100 results indicates something unexpected — process the first 4 pages and note the cap in the summary).
 2. Page N corresponds to the search URL with `&start=<25 × (N-1)>` appended (page 1 = `start=0`... you may omit `start` for page 1 since the tab is already there).
-3. **If there is more than 1 page, run pages in parallel**: spawn one subagent per page via the `Agent` tool, all in a single message so they run concurrently. Give each agent: the exact page URL (verbatim base URL + its `start` offset), the full text of the "Page procedure" section below, and the API reference. Each agent must create its **own tab** (`tabs_context_mcp`, then `tabs_create_mcp`) and work only in that tab.
+3. **If there is more than 1 page, run pages in parallel**: spawn one subagent per page via the `Agent` tool, all in a single message so they run concurrently. Give each agent: the exact page URL (verbatim base URL + its `start` offset), the full text of the "Page procedure" section below, the banned-company list from step 1 (verbatim, even if empty), and the API reference. Each agent must create its **own tab** (`tabs_context_mcp`, then `tabs_create_mcp`) and work only in that tab.
 4. If there is only 1 page, execute the Page procedure yourself in the current tab.
 5. Collect every agent's summary and aggregate them for the final summary. Because the feed can shift while agents run, two agents may occasionally process the same job — this is safe: `POST /api/jobs` is idempotent on `linkedinJobId` (the loser gets `duplicate:true`; don't count it as an insert, don't treat it as an error).
 
@@ -113,6 +118,7 @@ For each `exists:false` ID, in order:
    - **workplaceType** = the first standalone line among the pill lines (between locLine and `Easy Apply`/`Apply`) that is exactly `Remote`, `Hybrid`, or `On-site`.
    - **description** = everything from the line `About the job` up to (not including) the first of these end markers: `Set alert for similar jobs`, `This job alert is on` (shown instead when an alert already exists), `Put your best foot forward`, `Applicants for this job`, `More jobs`, `LinkedIn Corporation`. Strip a trailing `… more` line if present. (The full text is present in the DOM even while visually collapsed behind the `… more` button — expanding is not required for extraction.)
    - **NEVER truncate, cap, summarize, or paraphrase the description. Store the full text verbatim, however long it is.** A multi-KB description is expected and fine. If you catch yourself shortening it "to save tokens", stop — full fidelity is the whole point of this scraper; the job-scorer agent depends on it.
+   - **Banned-company check**: as soon as you have **company**, compare it case-insensitively (exact match, not substring) against the banned-company list you were given. On a match: do NOT proceed to postedAt conversion or the POST — record the job as skipped with reason "banned company", and move on to the next id. Only continue below if the company is not banned.
 4. **postedAt as ISO**: convert the relative text at extraction time (relative text like "14 minutes ago" is useless a day later). One small `javascript_tool` call:
    ```js
    function toIso(txt){
@@ -138,12 +144,12 @@ For each `exists:false` ID, in order:
      "status": "inbox"
    }
    ```
-   The response is compact (`{duplicate, id}`): `201 {duplicate:false, id}` = inserted, count it; `200 {duplicate:true, ...}` = race, don't count it, don't treat as error.
+   The response is compact (`{duplicate, id}`): `201 {duplicate:false, id}` = inserted, count it; `200 {duplicate:true, ...}` = race, don't count it, don't treat as error. A `200 {banned:true}` response means the company was banned server-side (the ban list may have changed mid-run) — treat it exactly like a banned-company skip: not an insert, not an error; record it as skipped with reason "banned company".
 6. Pace yourself: the forced-render cycles already space out navigations; don't remove them to go faster. Do not hammer LinkedIn with rapid-fire navigations — if you hit an unusual-activity/CAPTCHA page, stop your page immediately and report it.
 
 ### 5d. Page summary
 
-Return: page number, IDs found, how many already existed, list of inserted jobs (id + title + company), list of skipped jobs (id + reason), any selector drift, any LinkedIn interstitial encountered.
+Return: page number, IDs found, how many already existed, list of inserted jobs (id + title + company), list of render-failure/other skipped jobs (id + reason), list of banned-company skips (count + company names) reported separately, any selector drift, any LinkedIn interstitial encountered.
 
 ## 6. Stop rules (orchestrator)
 
@@ -157,7 +163,8 @@ Return: page number, IDs found, how many already existed, list of inserted jobs 
 End every run — success, early stop, or error — by printing one paragraph covering:
 
 - Total jobs inserted (count only true `duplicate:false` inserts), aggregated across all page agents.
-- List of any skipped jobs (id/title + reason).
+- List of render-failure/other skipped jobs (id/title + reason), aggregated across all page agents.
+- Banned-company skips, reported separately: count + the company names, aggregated across all page agents.
 - The stop reason: `all pages processed` / `entire page duplicates` / `page cap reached` / `error: <description>`.
 - Any selector drift any agent had to work around.
 
@@ -174,8 +181,9 @@ End every run — success, early stop, or error — by printing one paragraph co
 ## API reference
 
 - `GET /api/health` — health check.
+- `GET /api/banned-companies` → `{ companies: [{ id, name, createdAt }] }` — fetched once in step 1; keep the list for the whole run and pass it verbatim to every page agent.
 - `GET /api/jobs/exists?linkedinJobId=<id>` → `{ exists }`
-- `POST /api/jobs` `{ linkedinJobId, title, company, location, workplaceType, description, url, postedAt, status? }` → `201 { duplicate: false, id }` (inserted) or `200 { duplicate: true, id }` (already existed). Idempotent on `linkedinJobId`.
+- `POST /api/jobs` `{ linkedinJobId, title, company, location, workplaceType, description, url, postedAt, status? }` → `201 { duplicate: false, id }` (inserted), `200 { duplicate: true, id }` (already existed), or `200 { banned: true }` (company is banned server-side, nothing inserted). Idempotent on `linkedinJobId`.
 - `GET /api/jobs/search?company=<q>&title=<q>` → `{ jobs }` (case-insensitive partial match; use short distinctive fragments) — available if you need to cross-check a job, not required for the core flow.
 - `PATCH /api/jobs/:id` `{ status?, description? }` — status one of `screened_out|inbox|applied|action_needed|waiting|interview|offer|rejected`; `description` allows repairing a job whose description was scraped badly — not used in the core flow, listed for reference.
 - `POST /api/jobs/:id/emails` `{ gmailMessageId, gmailThreadId, subject, sender, snippet, receivedAt, classification }` — idempotent on `gmailMessageId` — not used in this playbook.

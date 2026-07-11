@@ -40,3 +40,9 @@ export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value"),
 });
+
+export const bannedCompanies = sqliteTable("banned_companies", {
+  id: int("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  createdAt: text("created_at").default(sql`(current_timestamp)`),
+});

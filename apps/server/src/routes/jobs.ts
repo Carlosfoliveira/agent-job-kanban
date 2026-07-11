@@ -2,7 +2,7 @@ import { and, eq, like, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { DbClient } from "../db/client";
-import { emails, jobs, settings } from "../db/schema";
+import { bannedCompanies, emails, jobs, settings } from "../db/schema";
 
 export const JOB_STATUSES = [
   "screened_out",
@@ -103,6 +103,15 @@ async function findJobByLinkedinId(db: DbClient, linkedinJobId: string) {
     .get();
 }
 
+async function isCompanyBanned(db: DbClient, company: string): Promise<boolean> {
+  const banned = await db
+    .select()
+    .from(bannedCompanies)
+    .where(eq(sql`lower(${bannedCompanies.name})`, company.toLowerCase()))
+    .get();
+  return Boolean(banned);
+}
+
 export function createJobsRouter(db: DbClient) {
   const router = new Hono();
 
@@ -187,6 +196,10 @@ export function createJobsRouter(db: DbClient) {
       // Reply with just the outcome + id; the scraper doesn't need the row
       // (esp. the multi-KB description) echoed back, and it wastes tokens.
       return c.json({ duplicate: true, id: existing.id });
+    }
+
+    if (await isCompanyBanned(db, data.company)) {
+      return c.json({ banned: true });
     }
 
     const now = new Date().toISOString();

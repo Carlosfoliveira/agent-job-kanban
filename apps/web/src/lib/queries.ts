@@ -10,6 +10,7 @@ import type { Job, NewEmailInput, UpdateEmailInput, UpdateJobInput } from "./typ
 export const jobsQueryKey = ["jobs"] as const;
 export const unmatchedEmailsQueryKey = ["emails", "unmatched"] as const;
 export const settingsQueryKey = ["settings"] as const;
+export const bannedCompaniesQueryKey = ["banned-companies"] as const;
 
 export function useJobs() {
   return useQuery({
@@ -160,6 +161,39 @@ export function useUpdateSettings() {
     // both caches are stale the moment it responds.
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: settingsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: jobsQueryKey });
+    },
+  });
+}
+
+export function useBannedCompanies() {
+  return useQuery({
+    queryKey: bannedCompaniesQueryKey,
+    queryFn: api.getBannedCompanies,
+  });
+}
+
+export function useBanCompany() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (company: string) => api.banCompany(company),
+    // Banning archives the company's cards server-side, so the jobs cache
+    // is stale too.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: bannedCompaniesQueryKey });
+      void queryClient.invalidateQueries({ queryKey: jobsQueryKey });
+    },
+  });
+}
+
+export function useUnbanCompany() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: number) => api.unbanCompany(id),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: bannedCompaniesQueryKey });
       void queryClient.invalidateQueries({ queryKey: jobsQueryKey });
     },
   });
