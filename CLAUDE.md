@@ -42,6 +42,7 @@ Data flows `lib/api.ts` (fetch wrapper) → `lib/queries.ts` (TanStack Query hoo
 ### Agent playbooks (`agents/*.md`)
 
 - Each playbook is mirrored at `~/.claude/scheduled-tasks/<name>/SKILL.md` for the Claude Desktop scheduled tasks. **The repo copy and the Desktop copy must stay byte-identical — every playbook edit is a two-file edit.**
+- The project skills `/linkedin-scraper`, `/job-scorer`, `/gmail-tracker` (`.claude/skills/<name>/SKILL.md`) are thin wrappers that read and execute `agents/<name>.md` — they contain no playbook logic, so playbook edits never require touching them.
 - The playbooks encode hard-won LinkedIn/Chrome workarounds (hidden-tab hydration, CSP blocking localhost fetches, virtualized lists) in their "Known quirks" sections — read those before changing scraper behavior, and never let an agent truncate or summarize a scraped job description.
 - Playbooks fail closed: health check first, any 5xx is fatal for the run, never guess-insert data.
 

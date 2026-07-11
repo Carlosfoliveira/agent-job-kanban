@@ -87,5 +87,5 @@ Print a closing checklist, filling in `$REPO`:
    Keep the stagger: scraper → scorer (+15m) → tracker (+30m), so new jobs are scored and screened before emails try to match them.
 3. **Connect Gmail** (tracker only): the Gmail MCP connector must be connected in the Desktop app, read-only use.
 4. **Preconditions at run time**: Mac awake; Chrome running and logged into LinkedIn (scraper only).
-5. **Smoke test now**: with the server running, offer to run the scraper playbook once interactively to confirm Chrome/LinkedIn/API all connect, then the scorer to confirm the profile scores jobs.
+5. **Smoke test now**: with the server running, offer to run `/linkedin-scraper` once to confirm Chrome/LinkedIn/API all connect, then `/job-scorer` to confirm the profile scores jobs. (Each agent is a project skill — `/linkedin-scraper`, `/job-scorer`, `/gmail-tracker` — runnable on demand any time.)
 6. **Tune later**: screen-out threshold and banned companies live in the board's Settings gear (top right).

@@ -84,6 +84,18 @@ The stagger matters: new jobs get scored (and screened out where warranted) befo
 
 Run-time preconditions: Mac awake; Chrome open and logged into LinkedIn (scraper); Gmail MCP connector connected in the Desktop app (tracker, read-only). The scorer only needs the API and `profile/` populated. Docs: https://code.claude.com/docs/en/desktop-scheduled-tasks.md
 
+### Run an agent on demand
+
+Each agent is also a project skill, so you can trigger it any time from a Claude Code session in this repo — no need to wait for the schedule:
+
+```
+/linkedin-scraper    # check for new postings now
+/job-scorer          # score whatever is unscored
+/gmail-tracker       # process recent replies
+```
+
+The skills run the exact same playbooks the routines use.
+
 ## The board
 
 | Column | Meaning |
