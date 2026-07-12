@@ -4,8 +4,7 @@ A self-updating job-application kanban board, run by Claude Code agents.
 
 Three scheduled agents do the busywork: one scrapes LinkedIn for new postings that match your search, one scores every posting against your resume so poor fits screen themselves out, and one reads your Gmail and moves cards forward when recruiters reply. You just drag cards and show up to interviews.
 
-<!-- TODO: replace with a real screenshot of the board -->
-![Kanban board](docs/screenshot.png)
+![Kanban board](screenshot.png)
 
 ## How it works
 
