@@ -13,6 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useState } from "react";
+import { useArchivedView } from "@/lib/archived-view";
 import { COLUMNS, SCORE_SORTED_STATUSES } from "@/lib/columns";
 import { useJobs, useUpdateJob } from "@/lib/queries";
 import { STAGE_STYLES } from "@/lib/stage";
@@ -109,7 +110,8 @@ function midpointSortOrder(
 }
 
 export function Board() {
-  const { data, isPending, isError, refetch } = useJobs();
+  const { allArchived, showAllArchived } = useArchivedView();
+  const { data, isPending, isError, isFetching, refetch } = useJobs();
   const updateJob = useUpdateJob();
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [preview, setPreview] = useState<DragPreview | null>(null);
@@ -123,6 +125,8 @@ export function Board() {
   const screenedCount = columns.screened_out.length;
   const trackedCount =
     jobs.length - screenedCount - columns.archived.length;
+  const archivedTotal = data?.archivedTotal ?? 0;
+  const archivedHidden = Math.max(0, archivedTotal - columns.archived.length);
 
   const findColumnOf = (id: number): JobStatus | null => {
     for (const status of JOB_STATUSES) {
@@ -304,7 +308,28 @@ export function Board() {
             onDragCancel={handleDragCancel}
           >
             {COLUMNS.map((def) => (
-              <Column key={def.status} def={def} jobs={columns[def.status]} />
+              <Column
+                key={def.status}
+                def={def}
+                jobs={columns[def.status]}
+                totalCount={
+                  def.status === "archived" ? archivedTotal : undefined
+                }
+                footer={
+                  def.status === "archived" && archivedHidden > 0 ? (
+                    <button
+                      type="button"
+                      onClick={showAllArchived}
+                      disabled={allArchived && isFetching}
+                      className="shrink-0 rounded-md border border-dashed border-line px-2 py-2.5 font-mono text-[10px] tracking-wider text-faint transition-colors hover:border-mist/40 hover:text-mist disabled:opacity-50"
+                    >
+                      {allArchived && isFetching
+                        ? "loading…"
+                        : `Load Archived Jobs (${archivedHidden} more)`}
+                    </button>
+                  ) : undefined
+                }
+              />
             ))}
             <DragOverlay>
               {activeJob ? <JobCardGhost job={activeJob} /> : null}

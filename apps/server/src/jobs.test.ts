@@ -1,9 +1,13 @@
 import { describe, expect, it } from "bun:test";
+import { eq } from "drizzle-orm";
+import { jobs } from "./db/schema";
+import { ARCHIVED_DEFAULT_LIMIT } from "./routes/jobs";
 import { createTestApp, readJson, type JobRow, type TestApp } from "./test-utils";
 
 type JobResponse = { duplicate: boolean; id: number };
 type JobsListResponse = {
   jobs: (JobRow & { emailCount: number; unseenCount: number })[];
+  archivedTotal: number;
 };
 type ExistsResponse = { exists: boolean };
 
@@ -349,5 +353,73 @@ describe("GET /api/jobs email aggregates", () => {
     const body = await readJson<JobsListResponse>(res);
     expect(body.jobs[0]?.emailCount).toBe(0);
     expect(body.jobs[0]?.unseenCount).toBe(0);
+  });
+});
+
+describe("GET /api/jobs archived cap", () => {
+  // 2 active jobs + `count` archived ones, each archived job stamped with a
+  // distinct updatedAt so "most recently updated" is deterministic.
+  async function seedBoard(count: number) {
+    const { app, db } = createTestApp();
+    await postJson(app, "/api/jobs", jobPayload({ linkedinJobId: "active-1" }));
+    await postJson(
+      app,
+      "/api/jobs",
+      jobPayload({ linkedinJobId: "active-2", status: "inbox" }),
+    );
+
+    const archivedIds: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const created = await readJson<JobResponse>(
+        await postJson(
+          app,
+          "/api/jobs",
+          jobPayload({ linkedinJobId: `arch-${i}`, status: "archived" }),
+        ),
+      );
+      archivedIds.push(created.id);
+      await db
+        .update(jobs)
+        .set({ updatedAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z` })
+        .where(eq(jobs.id, created.id));
+    }
+    return { app, archivedIds };
+  }
+
+  it("caps archived jobs at the most recently updated by default", async () => {
+    const total = ARCHIVED_DEFAULT_LIMIT + 3;
+    const { app, archivedIds } = await seedBoard(total);
+
+    const body = await readJson<JobsListResponse>(await app.request("/api/jobs"));
+    const archived = body.jobs.filter((j) => j.status === "archived");
+
+    expect(archived.length).toBe(ARCHIVED_DEFAULT_LIMIT);
+    expect(body.archivedTotal).toBe(total);
+    // The 3 oldest (lowest updatedAt) archived jobs are the ones dropped.
+    const returnedIds = new Set(archived.map((j) => j.id));
+    for (const oldId of archivedIds.slice(0, 3)) {
+      expect(returnedIds.has(oldId)).toBe(false);
+    }
+    // Non-archived jobs are never capped.
+    expect(body.jobs.filter((j) => j.status !== "archived").length).toBe(2);
+  });
+
+  it("returns every archived job with ?archived=all", async () => {
+    const total = ARCHIVED_DEFAULT_LIMIT + 3;
+    const { app } = await seedBoard(total);
+
+    const body = await readJson<JobsListResponse>(
+      await app.request("/api/jobs?archived=all"),
+    );
+    expect(body.jobs.filter((j) => j.status === "archived").length).toBe(total);
+    expect(body.archivedTotal).toBe(total);
+  });
+
+  it("does not cap when archived jobs are within the limit", async () => {
+    const { app } = await seedBoard(4);
+
+    const body = await readJson<JobsListResponse>(await app.request("/api/jobs"));
+    expect(body.jobs.filter((j) => j.status === "archived").length).toBe(4);
+    expect(body.archivedTotal).toBe(4);
   });
 });

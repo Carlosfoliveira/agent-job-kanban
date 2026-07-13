@@ -6,14 +6,15 @@ import {
 } from "@tanstack/react-router";
 import { Board } from "./components/board";
 import { JobDetailSheet } from "./components/job-detail-sheet";
+import { ArchivedViewProvider } from "./lib/archived-view";
 
 /** The board is always mounted; child routes layer on top of it. */
 function AppShell() {
   return (
-    <>
+    <ArchivedViewProvider>
       <Board />
       <Outlet />
-    </>
+    </ArchivedViewProvider>
   );
 }
 

@@ -1,10 +1,13 @@
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
   type QueryClient,
+  type QueryKey,
 } from "@tanstack/react-query";
 import { api, type EmailsResponse, type JobsResponse } from "./api";
+import { useArchivedView } from "./archived-view";
 import type { Job, NewEmailInput, UpdateEmailInput, UpdateJobInput } from "./types";
 
 export const jobsQueryKey = ["jobs"] as const;
@@ -13,9 +16,12 @@ export const settingsQueryKey = ["settings"] as const;
 export const bannedCompaniesQueryKey = ["banned-companies"] as const;
 
 export function useJobs() {
+  const { allArchived } = useArchivedView();
   return useQuery({
-    queryKey: jobsQueryKey,
-    queryFn: api.getJobs,
+    queryKey: [...jobsQueryKey, allArchived ? "all-archived" : "recent-archived"],
+    queryFn: () => api.getJobs(allArchived),
+    // Keep the truncated board on screen while the full archived set loads.
+    placeholderData: keepPreviousData,
     refetchOnWindowFocus: true,
   });
 }
@@ -25,19 +31,30 @@ interface UpdateJobVariables {
   input: UpdateJobInput;
 }
 
-function patchJobInCache(
+// The jobs query exists under one key per archived view, so optimistic
+// updates patch (and snapshots capture) every cache under the prefix.
+type JobsCacheSnapshot = [QueryKey, JobsResponse | undefined][];
+
+function snapshotJobsCaches(queryClient: QueryClient): JobsCacheSnapshot {
+  return queryClient.getQueriesData<JobsResponse>({ queryKey: jobsQueryKey });
+}
+
+function restoreJobsCaches(
   queryClient: QueryClient,
-  id: number,
-  input: UpdateJobInput,
+  snapshot: JobsCacheSnapshot,
 ) {
-  queryClient.setQueryData<JobsResponse>(jobsQueryKey, (old) => {
-    if (!old) return old;
-    return {
-      jobs: old.jobs.map((job) =>
-        job.id === id ? { ...job, ...input } : job,
-      ),
-    };
-  });
+  for (const [key, data] of snapshot) {
+    queryClient.setQueryData(key, data);
+  }
+}
+
+function patchJobsCaches(
+  queryClient: QueryClient,
+  update: (jobs: Job[]) => Job[],
+) {
+  queryClient.setQueriesData<JobsResponse>({ queryKey: jobsQueryKey }, (old) =>
+    old ? { ...old, jobs: update(old.jobs) } : old,
+  );
 }
 
 export function useUpdateJob() {
@@ -49,20 +66,17 @@ export function useUpdateJob() {
     onMutate: async ({ id, input }: UpdateJobVariables) => {
       await queryClient.cancelQueries({ queryKey: jobsQueryKey });
 
-      const previousJobs = queryClient.getQueryData<JobsResponse>(
-        jobsQueryKey,
-      );
+      const previousJobs = snapshotJobsCaches(queryClient);
 
-      patchJobInCache(queryClient, id, input);
+      patchJobsCaches(queryClient, (jobs) =>
+        jobs.map((job) => (job.id === id ? { ...job, ...input } : job)),
+      );
 
       return { previousJobs };
     },
     onError: (_err, _variables, context) => {
       if (context?.previousJobs) {
-        queryClient.setQueryData<JobsResponse>(
-          jobsQueryKey,
-          context.previousJobs,
-        );
+        restoreJobsCaches(queryClient, context.previousJobs);
       }
     },
     onSettled: () => {
@@ -81,28 +95,20 @@ export function useArchiveJobs() {
     onMutate: async (ids: number[]) => {
       await queryClient.cancelQueries({ queryKey: jobsQueryKey });
 
-      const previousJobs = queryClient.getQueryData<JobsResponse>(
-        jobsQueryKey,
-      );
+      const previousJobs = snapshotJobsCaches(queryClient);
 
       const idSet = new Set(ids);
-      queryClient.setQueryData<JobsResponse>(jobsQueryKey, (old) => {
-        if (!old) return old;
-        return {
-          jobs: old.jobs.map((job): Job =>
-            idSet.has(job.id) ? { ...job, status: "archived" } : job,
-          ),
-        };
-      });
+      patchJobsCaches(queryClient, (jobs) =>
+        jobs.map((job): Job =>
+          idSet.has(job.id) ? { ...job, status: "archived" } : job,
+        ),
+      );
 
       return { previousJobs };
     },
     onError: (_err, _ids, context) => {
       if (context?.previousJobs) {
-        queryClient.setQueryData<JobsResponse>(
-          jobsQueryKey,
-          context.previousJobs,
-        );
+        restoreJobsCaches(queryClient, context.previousJobs);
       }
     },
     onSettled: () => {
@@ -119,23 +125,17 @@ export function useDeleteJob() {
     onMutate: async (id: number) => {
       await queryClient.cancelQueries({ queryKey: jobsQueryKey });
 
-      const previousJobs = queryClient.getQueryData<JobsResponse>(
-        jobsQueryKey,
-      );
+      const previousJobs = snapshotJobsCaches(queryClient);
 
-      queryClient.setQueryData<JobsResponse>(jobsQueryKey, (old) => {
-        if (!old) return old;
-        return { jobs: old.jobs.filter((job) => job.id !== id) };
-      });
+      patchJobsCaches(queryClient, (jobs) =>
+        jobs.filter((job) => job.id !== id),
+      );
 
       return { previousJobs };
     },
     onError: (_err, _id, context) => {
       if (context?.previousJobs) {
-        queryClient.setQueryData<JobsResponse>(
-          jobsQueryKey,
-          context.previousJobs,
-        );
+        restoreJobsCaches(queryClient, context.previousJobs);
       }
     },
     onSettled: () => {
@@ -268,27 +268,19 @@ export function useMarkJobEmailsSeen() {
     onMutate: async (jobId: number) => {
       await queryClient.cancelQueries({ queryKey: jobsQueryKey });
 
-      const previousJobs = queryClient.getQueryData<JobsResponse>(
-        jobsQueryKey,
-      );
+      const previousJobs = snapshotJobsCaches(queryClient);
 
-      queryClient.setQueryData<JobsResponse>(jobsQueryKey, (old) => {
-        if (!old) return old;
-        return {
-          jobs: old.jobs.map((job): Job =>
-            job.id === jobId ? { ...job, unseenCount: 0 } : job,
-          ),
-        };
-      });
+      patchJobsCaches(queryClient, (jobs) =>
+        jobs.map((job): Job =>
+          job.id === jobId ? { ...job, unseenCount: 0 } : job,
+        ),
+      );
 
       return { previousJobs };
     },
     onError: (_err, _jobId, context) => {
       if (context?.previousJobs) {
-        queryClient.setQueryData<JobsResponse>(
-          jobsQueryKey,
-          context.previousJobs,
-        );
+        restoreJobsCaches(queryClient, context.previousJobs);
       }
     },
     onSettled: () => {

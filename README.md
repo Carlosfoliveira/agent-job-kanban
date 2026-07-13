@@ -118,7 +118,7 @@ Base URL: `http://localhost:3001`. Bodies are Zod-validated server-side; see `ap
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | Liveness check, `{ok: true}`. |
-| GET | `/api/jobs` | Full job list with email counts. |
+| GET | `/api/jobs` | Job list with email counts. Archived jobs are capped to the 10 most recent (`archivedTotal` reports the real count); pass `?archived=all` for the full set. |
 | GET | `/api/jobs/exists?linkedinJobId=` | Dedupe check before inserting a scraped job. |
 | GET | `/api/jobs/search?company=&title=` | Case-insensitive partial match, used to link emails to jobs. |
 | POST | `/api/jobs` | Create a job. Idempotent on `linkedinJobId`; returns `{banned: true}` without inserting if the company is banned. |

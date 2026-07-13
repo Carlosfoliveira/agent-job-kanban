@@ -31,6 +31,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface JobsResponse {
   jobs: Job[];
+  /** Real archived count — the jobs list caps archived rows unless
+   * requested with allArchived. */
+  archivedTotal: number;
 }
 
 export interface JobResponse {
@@ -99,8 +102,10 @@ export interface UpdateSettingsResponse {
 
 export const api = {
   // Jobs
-  getJobs(): Promise<JobsResponse> {
-    return request<JobsResponse>("/api/jobs");
+  getJobs(allArchived = false): Promise<JobsResponse> {
+    return request<JobsResponse>(
+      allArchived ? "/api/jobs?archived=all" : "/api/jobs",
+    );
   },
 
   createJob(input: NewJobInput): Promise<CreateJobResponse> {

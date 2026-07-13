@@ -4,6 +4,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { Archive } from "lucide-react";
+import type { ReactNode } from "react";
 import type { ColumnDef } from "@/lib/columns";
 import { useArchiveJobs, useSettings } from "@/lib/queries";
 import { STAGE_STYLES } from "@/lib/stage";
@@ -11,11 +12,24 @@ import type { Job } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { JobCard, ScoreOrderedJobCard } from "./job-card";
 
-export function Column({ def, jobs }: { def: ColumnDef; jobs: Job[] }) {
+export function Column({
+  def,
+  jobs,
+  totalCount,
+  footer,
+}: {
+  def: ColumnDef;
+  jobs: Job[];
+  /** Real column size when the server sends a truncated list. */
+  totalCount?: number;
+  /** Rendered after the cards, at the end of the scroll area. */
+  footer?: ReactNode;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: def.status });
   const { data: settings } = useSettings();
   const archiveJobs = useArchiveJobs();
   const stage = STAGE_STYLES[def.status];
+  const count = totalCount ?? jobs.length;
 
   const list = (
     <div
@@ -34,12 +48,13 @@ export function Column({ def, jobs }: { def: ColumnDef; jobs: Job[] }) {
           empty
         </div>
       )}
+      {footer}
     </div>
   );
 
   return (
     <section
-      aria-label={`${def.label} column, ${jobs.length} jobs`}
+      aria-label={`${def.label} column, ${count} jobs`}
       className={cn(
         "flex h-full w-72 shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-panel",
         isOver && cn("ring-1 ring-inset", stage.ring),
@@ -64,7 +79,7 @@ export function Column({ def, jobs }: { def: ColumnDef; jobs: Job[] }) {
             stage.chip,
           )}
         >
-          {jobs.length}
+          {count}
         </span>
         {def.status !== "archived" && jobs.length > 0 && (
           <button

@@ -18,6 +18,11 @@ export const JOB_STATUSES = [
 
 const jobStatusSchema = z.enum(JOB_STATUSES);
 
+// The archived column grows without bound; sending every archived row makes
+// the board render hundreds of dead cards. Only the most recently archived
+// ones ship by default — ?archived=all opts into the full set.
+export const ARCHIVED_DEFAULT_LIMIT = 10;
+
 const createJobSchema = z.object({
   linkedinJobId: z.string().min(1),
   title: z.string().min(1),
@@ -116,7 +121,11 @@ export function createJobsRouter(db: DbClient) {
   const router = new Hono();
 
   // GET /api/jobs — all jobs with emailCount / unseenCount aggregates.
+  // Archived jobs are capped at the ARCHIVED_DEFAULT_LIMIT most recently
+  // updated unless ?archived=all is passed; archivedTotal always reports
+  // the real count.
   router.get("/", async (c) => {
+    const allArchived = c.req.query("archived") === "all";
     const rows = await db
       .select({
         id: jobs.id,
@@ -145,7 +154,25 @@ export function createJobsRouter(db: DbClient) {
       .groupBy(jobs.id)
       .orderBy(jobs.sortOrder, jobs.id);
 
-    return c.json({ jobs: rows });
+    const archived = rows.filter((row) => row.status === "archived");
+    let visible = rows;
+    if (!allArchived && archived.length > ARCHIVED_DEFAULT_LIMIT) {
+      const keep = new Set(
+        [...archived]
+          .sort(
+            (a, b) =>
+              (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "") ||
+              b.id - a.id,
+          )
+          .slice(0, ARCHIVED_DEFAULT_LIMIT)
+          .map((row) => row.id),
+      );
+      visible = rows.filter(
+        (row) => row.status !== "archived" || keep.has(row.id),
+      );
+    }
+
+    return c.json({ jobs: visible, archivedTotal: archived.length });
   });
 
   // GET /api/jobs/exists?linkedinJobId=X
