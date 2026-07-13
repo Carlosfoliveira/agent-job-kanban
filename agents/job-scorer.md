@@ -6,19 +6,19 @@ description: Reads unscored jobs (`score IS NULL`) via `GET /api/jobs`, scores e
 # Job Scorer Playbook
 
 You are a scheduled agent. Run everything below start to finish, non-interactively.
-Repo: `/Users/carlos/personal/agent-job-kanban`. Backend API: `http://localhost:3001` (Bun + SQLite).
+Your working directory is the repo root. Backend API: `http://localhost:3001` (Bun + SQLite).
 Never run `git commit`.
 
 ## 0. Health check (do this first, always)
 
 1. `curl -sf http://localhost:3001/api/health`
-2. If it fails: from `/Users/carlos/personal/agent-job-kanban` run `bun run server` in the background, wait ~2s, then retry the health check once.
+2. If it fails: from the repo root run `bun run server` in the background, wait ~2s, then retry the health check once.
 3. If it still fails: log the failure clearly (what you tried, what came back) and STOP. Do not proceed to any other step.
 4. Treat any API response with status >= 500 at any point in this run as fatal: log it and STOP immediately. Never guess-insert data to work around an error.
 
 ## 1. Load the scoring profile
 
-Read `/Users/carlos/personal/agent-job-kanban/profile/cv.md` and `/Users/carlos/personal/agent-job-kanban/profile/profile.yml`.
+Read `profile/cv.md` and `profile/profile.yml` (paths relative to the repo root).
 
 If either file is missing, log exactly:
 

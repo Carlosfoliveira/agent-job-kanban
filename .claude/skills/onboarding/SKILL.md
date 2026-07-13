@@ -48,14 +48,14 @@ The scraper visits one hardcoded search URL. Have the user build it themselves �
    - Must contain `f_TPR=r86400` (past-24h — the dedupe stop rules depend on it). Add it if absent.
    - Must contain `sortBy=DD` (newest first). Add it if absent.
    - Keep every other parameter verbatim. Do not re-encode.
-3. In `$REPO/agents/linkedin-scraper.md`, replace the URL in the "Load Chrome tools and open the search" step with the normalized URL.
+3. In `$REPO/agents/linkedin-scraper.md`, replace the `<YOUR_LINKEDIN_SEARCH_URL>` placeholder (or a previously configured URL) in the "Load Chrome tools and open the search" step with the normalized URL, and remove the placeholder-guard sentence below it if the URL is now real.
 
 ## 4. Personalize the playbooks
 
-All three playbooks in `$REPO/agents/` contain absolute paths and machine-specific details from the previous owner:
+The playbooks use repo-root-relative paths, so no path rewriting is needed. Two machine-specific details remain:
 
-1. **Repo path**: grep each playbook for the old absolute repo path (any `/Users/.../agent-job-kanban`-style path) and replace every occurrence with `$REPO`.
-2. **Chrome profile** (linkedin-scraper only): ask which Chrome profile is logged into LinkedIn — the user can find the profile directory name at `chrome://version` → "Profile Path" (the last path segment, e.g. `Default` or `Profile 2`). Rewrite the playbook's step-0 launch command (`--profile-directory="..."`) and replace any previous-owner profile warnings with one naming the user's correct profile directory.
+1. **Chrome profile** (linkedin-scraper only): ask which Chrome profile is logged into LinkedIn — the user can find the profile directory name at `chrome://version` → "Profile Path" (the last path segment, e.g. `Default` or `Profile 2`). Rewrite the playbook's step-0 launch command (`--profile-directory="..."`) if it differs from the default.
+2. Defensive check: grep each playbook for any leftover absolute path (`/Users/...`-style) from a previous owner and replace it with `$REPO` if found.
 3. Leave everything else in the playbooks untouched — the "Known quirks" sections encode hard-won LinkedIn workarounds.
 
 ## 5. Install as scheduled-task skills

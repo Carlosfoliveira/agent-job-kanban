@@ -6,12 +6,12 @@ description: Scans Gmail for application-related messages, matches each one to a
 # Gmail Job-Tracker Playbook
 
 You are a scheduled agent. Run everything below start to finish, non-interactively.
-Repo: `/Users/carlos/personal/agent-job-kanban`. Backend API: `http://localhost:3001` (Bun + SQLite).
+Your working directory is the repo root. Backend API: `http://localhost:3001` (Bun + SQLite).
 
 ## 0. Health check (do this first, always)
 
 1. `curl -sf http://localhost:3001/api/health`
-2. If it fails: from `/Users/carlos/personal/agent-job-kanban` run `bun run server` in the background, wait ~2s, then retry the health check once.
+2. If it fails: from the repo root run `bun run server` in the background, wait ~2s, then retry the health check once.
 3. If it still fails: log the failure clearly (what you tried, what came back) and STOP. Do not proceed to any other step.
 4. Treat any API response with status >= 500 at any point in this run as fatal: log it and STOP immediately. Never guess-insert data to work around an error.
 
@@ -40,7 +40,7 @@ Companies rarely email only through LinkedIn — most follow-ups (assessments, i
 
 From all passes, keep only threads that are genuinely job-related. Discard LinkedIn job-alert digests, connection/InMail social notifications, billing emails, and newsletters that merely mention a company name.
 
-Known senders/domains in Carlos's inbox to recognize as job-related: `jobs-noreply@linkedin.com`, `linkedin.com`, `workablemail.com`, `ashbyhq.com`, `greenhouse-mail.io`, `teamtailor-mail.com`, `deel.com`, `coderpad.io`, `micro1.ai`, `torre.ai`, `hirehangar.com`, `breakmarkhr.com`, `luflox.com`, `unlockcareer.ai`, `proxify.io`, `gympass.com` (Wellhub's ATS sender), `rippling.com` (ATS, e.g. `ats.rippling.com`), `devsu.com`. **When a run discovers a new job-related sender domain not in this list, append it to this list in both copies of this playbook** (`agents/gmail-tracker.md` in the repo and `~/.claude/scheduled-tasks/gmail-tracker/SKILL.md`) so future runs recognize it.
+Known job-related sender domains (ATS platforms, job boards, hiring tools) to recognize: `jobs-noreply@linkedin.com`, `linkedin.com`, `workablemail.com`, `ashbyhq.com`, `greenhouse-mail.io`, `teamtailor-mail.com`, `deel.com`, `coderpad.io`, `micro1.ai`, `torre.ai`, `hirehangar.com`, `breakmarkhr.com`, `luflox.com`, `unlockcareer.ai`, `proxify.io`, `rippling.com` (ATS, e.g. `ats.rippling.com`). **When a run discovers a new job-related sender domain not in this list, append it to this list in both copies of this playbook** (`agents/gmail-tracker.md` in the repo and `~/.claude/scheduled-tasks/gmail-tracker/SKILL.md`) so future runs recognize it.
 
 For each candidate thread, call `get_thread` to pull the message(s): `gmailMessageId`, `gmailThreadId`, `subject`, `sender`, a short `snippet` (body excerpt, a sentence or two), and `receivedAt`.
 
@@ -48,7 +48,7 @@ For each candidate thread, call `get_thread` to pull the message(s): `gmailMessa
 
 Assign exactly one classification:
 - `confirmation` — application received/sent acknowledgement
-- `action_request` — they need something from Carlos (question, form, assessment invite requiring action)
+- `action_request` — they need something from the candidate (question, form, assessment invite requiring action)
 - `interview` — interview or assessment scheduling
 - `rejection` — rejected/moving forward with other candidates
 - `offer` — job offer

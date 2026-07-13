@@ -1,15 +1,15 @@
 ---
 name: linkedin-scraper
-description: Browses LinkedIn (via Chrome) for new job postings matching Carlos's search, checks each one against `GET /api/jobs/exists`, and inserts new ones via `POST /api/jobs` into the `inbox` column
+description: Browses LinkedIn (via Chrome) for new job postings matching the configured search, checks each one against `GET /api/jobs/exists`, and inserts new ones via `POST /api/jobs` into the `inbox` column
 ---
 
 # LinkedIn Job Scraper Playbook
 
 You are a scheduled agent. Follow these steps in order, exactly. Do not skip steps. Do not improvise data. Never run `git commit`.
 
-## 0. Ensure Chrome has an OPEN WINDOW with the Carlos profile
+## 0. Ensure Chrome has an OPEN WINDOW with the LinkedIn-logged-in profile
 
-A running Chrome **process** is not enough: on macOS Chrome stays resident in the background after its last window closes, and with zero windows the MCP extension cannot connect. You need process AND at least one open window. The launch command below is safe to run in every case — if Chrome isn't running it starts it; if it's already running it just opens a new window in the Carlos profile:
+A running Chrome **process** is not enough: on macOS Chrome stays resident in the background after its last window closes, and with zero windows the MCP extension cannot connect. You need process AND at least one open window. The launch command below is safe to run in every case — if Chrome isn't running it starts it; if it's already running it just opens a new window in the configured profile:
 
 ```bash
 open -na "Google Chrome" --args --profile-directory="Default"
@@ -27,7 +27,7 @@ Procedure:
    - If ≥ 1 window exists, proceed as-is.
 3. Verify connectivity by calling `tabs_context_mcp` with `createIfEmpty: true` (after loading Chrome tools in step 2 below). If it errors with "extension disconnected" or similar, run the launch command once more, wait ~5 seconds, and retry once. If it still fails, log "Chrome extension not connectable" and STOP.
 
-- **NEVER use `Profile 4`** — that is the "Turing" work profile (carlos.o@turing.com). Profile directory `Default` is the **Carlos** profile (carlos.fe.oliveira@gmail.com). If you ever observe (via screenshot or page content) that the active window is the Turing profile, do not proceed with it; open a Carlos-profile window with the launch command instead.
+- **Only use the profile directory configured in the launch command above** — that is the profile logged into LinkedIn (`/onboarding` sets it; find yours at `chrome://version` → "Profile Path", last path segment). If you ever observe (via screenshot or page content) that the active window belongs to a different Chrome profile, do not proceed with it; open a window in the configured profile with the launch command instead.
 
 ## 1. Health check
 
@@ -36,7 +36,7 @@ curl http://localhost:3001/api/health
 ```
 
 - If this succeeds, continue to step 2.
-- If it fails (connection refused / timeout): from `/Users/carlos/personal/agent-job-kanban` run `bun run server` in the background, wait ~2 seconds, then retry the health check once.
+- If it fails (connection refused / timeout): from the repo root run `bun run server` in the background, wait ~2 seconds, then retry the health check once.
 - If it still fails: log the failure clearly (e.g. "Backend health check failed after retry, aborting run") and STOP. Do not proceed.
 - At any later point in this run, if any API call returns a 5xx status, treat it as fatal: log the failure and STOP immediately. Never guess-insert data and never continue past a failed API call.
 - Once the health check passes, fetch the banned-company list and keep it for the whole run:
@@ -59,8 +59,10 @@ Then:
 3. Navigate to EXACTLY this URL — copy it verbatim, do not alter any parameter, do not "clean up" or re-encode it:
 
 ```
-https://www.linkedin.com/jobs/search/?f_E=4&f_TPR=r86400&f_WT=2&geoId=106057199&keywords=full%20stack&origin=JOB_SEARCH_PAGE_LOCATION_AUTOCOMPLETE&refresh=true&sortBy=DD
+<YOUR_LINKEDIN_SEARCH_URL>
 ```
+
+If the line above is still a placeholder rather than a real `https://www.linkedin.com/jobs/search/?...` URL (it must include `f_TPR=r86400` and `sortBy=DD` — `/onboarding` fills this in), log "search URL not configured — run /onboarding" and STOP.
 
 ## 3. Auth check
 
