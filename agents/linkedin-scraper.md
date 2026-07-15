@@ -50,7 +50,7 @@ curl http://localhost:3001/api/health
 Call `ToolSearch` once with:
 
 ```
-select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__javascript_tool,mcp__claude-in-chrome__get_page_text
+select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__tabs_close_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__javascript_tool,mcp__claude-in-chrome__get_page_text
 ```
 
 Then:
@@ -72,7 +72,7 @@ If the page shows a login wall / authwall (a login/join form instead of job resu
 
 1. Read the total result count from the header (e.g. "51 results"): it appears near the top of the results list; via JS you can read it from the text of the banner above the list. Compute `pages = ceil(count / 25)`, **capped at 4 pages** (the search is already limited to the past 24 hours, so more than ~100 results indicates something unexpected — process the first 4 pages and note the cap in the summary).
 2. Page N corresponds to the search URL with `&start=<25 × (N-1)>` appended (page 1 = `start=0`... you may omit `start` for page 1 since the tab is already there).
-3. **If there is more than 1 page, run pages in parallel**: spawn one subagent per page via the `Agent` tool, all in a single message so they run concurrently. Give each agent: the exact page URL (verbatim base URL + its `start` offset), the full text of the "Page procedure" section below, the banned-company list from step 1 (verbatim, even if empty), and the API reference. Each agent must create its **own tab** (`tabs_context_mcp`, then `tabs_create_mcp`) and work only in that tab.
+3. **If there is more than 1 page, run pages in parallel**: spawn one subagent per page via the `Agent` tool, all in a single message so they run concurrently. Give each agent: the exact page URL (verbatim base URL + its `start` offset), the full text of the "Page procedure" section below, the banned-company list from step 1 (verbatim, even if empty), and the API reference. Each agent must create its **own tab** (`tabs_context_mcp`, then `tabs_create_mcp`), work only in that tab, and close it (`tabs_close_mcp`) as soon as its page is finished (see 5d) — make sure each agent loads `tabs_close_mcp` along with the other Chrome tools.
 4. If there is only 1 page, execute the Page procedure yourself in the current tab.
 5. Collect every agent's summary and aggregate them for the final summary. Because the feed can shift while agents run, two agents may occasionally process the same job — this is safe: `POST /api/jobs` is idempotent on `linkedinJobId` (the loser gets `duplicate:true`; don't count it as an insert, don't treat it as an error).
 
@@ -149,7 +149,15 @@ For each `exists:false` ID, in order:
    The response is compact (`{duplicate, id}`): `201 {duplicate:false, id}` = inserted, count it; `200 {duplicate:true, ...}` = race, don't count it, don't treat as error. A `200 {banned:true}` response means the company was banned server-side (the ban list may have changed mid-run) — treat it exactly like a banned-company skip: not an insert, not an error; record it as skipped with reason "banned company".
 6. Pace yourself: the forced-render cycles already space out navigations; don't remove them to go faster. Do not hammer LinkedIn with rapid-fire navigations — if you hit an unusual-activity/CAPTCHA page, stop your page immediately and report it.
 
-### 5d. Page summary
+### 5d. Close your tab
+
+When your page is finished — every `exists:false` ID processed, or the page turned out to be entirely duplicates — close the tab you created, as your last browser action before returning the summary:
+
+1. Call `tabs_close_mcp` with your own tab's ID.
+2. Close ONLY the tab you created — never another agent's tab.
+3. Close it on early page-local stops too (render failures, entire page duplicates). One exception: if you stopped because of an authwall/CAPTCHA interstitial, LEAVE the tab open — the user may need to see and resolve it — and say so in your summary.
+
+### 5e. Page summary
 
 Return: page number, IDs found, how many already existed, list of inserted jobs (id + title + company), list of render-failure/other skipped jobs (id + reason), list of banned-company skips (count + company names) reported separately, any selector drift, any LinkedIn interstitial encountered.
 
@@ -161,6 +169,8 @@ Return: page number, IDs found, how many already existed, list of inserted jobs 
 - If ANY page hit an authwall/CAPTCHA, or any API call returned 5xx, surface that as the run's stop reason.
 
 ## 7. Final summary
+
+Once all page agents have returned, close your own search tab with `tabs_close_mcp` (the page agents already closed theirs in 5d) — unless the run stopped on an authwall/CAPTCHA, in which case leave it open for the user to resolve.
 
 End every run — success, early stop, or error — by printing one paragraph covering:
 
